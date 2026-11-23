@@ -23,13 +23,16 @@ SQLite 持久化文件
 ```text
 Project
  ├─ Chapter[]
- ├─ Node[] ── optional chapter_id ──> Chapter
+ │   └─ Scene[]
+ ├─ Node[] ── optional scene_id ──> Scene
+ │   ├────── optional chapter_id ──> Chapter
+ │   └─ NodeNote[]
  └─ Edge[] ── source_id / target_id ──> Node
 ```
 
 ## 已确认的设计优点
 
-- 节点双击跳到章节，符合用户的空间记忆。
+- 节点可创建并跳转场景，场景正文也能返回地图节点，形成双向导航。
 - 节点便签与章节正文分离，适合保存写作意图、伏笔和待办。
 - 同一画布可以混合情节、人物、地点和冲突，而不是只做树状脑图。
 - 前后端分离后，社区可以独立开发 Web、桌面或移动客户端。
@@ -57,9 +60,9 @@ Project
 
 SQLite 很适合零运维自托管。多人同时写作、评论或共享项目时应支持 PostgreSQL。数据库层应保持清晰，避免把 SQLite 特有语法散落到业务代码。
 
-### “节点链接章节”的未来扩展
+### “节点链接写作资源”的未来扩展
 
-当前每个节点最多链接一个章节，满足点击节点跳转的核心需求。如果未来要让节点同时链接章节、人物卡和资料，应把 `chapter_id` 升级为独立的 `resource_links` 表，而不是不断给 `nodes` 增加外键字段。
+当前每个节点最多链接一个章节和该章节下的一个场景。如果未来要让节点同时链接多个场景、人物卡和资料，应把 `chapter_id`、`scene_id` 升级为独立的 `resource_links` 表，而不是不断给 `nodes` 增加外键字段。
 
 ## 建议路线
 

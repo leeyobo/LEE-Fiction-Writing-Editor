@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -47,10 +48,66 @@ class ApiFlowTest(unittest.TestCase):
         )
         self.assertEqual(edge.status_code, 201)
 
+        scene_link = self.client.post(
+            f"/api/nodes/{first['id']}/scene",
+            json={"chapter_id": chapter["id"]},
+        )
+        self.assertEqual(scene_link.status_code, 201)
+        scene = scene_link.json()["scene"]
+        self.assertEqual(scene["title"], "Storm")
+        scene_update = self.client.patch(
+            f"/api/scenes/{scene['id']}",
+            json={"content": "Rain covers the old harbor."},
+        )
+        self.assertEqual(scene_update.status_code, 200)
+
+        first_note = self.client.post(
+            f"/api/nodes/{first['id']}/notes",
+            json={"content": "Reveal the hidden motive.", "locked": False},
+        )
+        second_note = self.client.post(
+            f"/api/nodes/{first['id']}/notes",
+            json={"content": "Keep this clue visible.", "locked": True},
+        )
+        self.assertEqual(first_note.status_code, 201)
+        self.assertEqual(second_note.status_code, 201)
+        locked_update = self.client.patch(
+            f"/api/notes/{first_note.json()['id']}",
+            json={"locked": True},
+        )
+        self.assertTrue(locked_update.json()["locked"])
+
         final = self.client.get(f"/api/projects/{project['id']}").json()
         self.assertEqual(len(final["nodes"]), 2)
         self.assertEqual(len(final["edges"]), 1)
+        self.assertEqual(len(final["scenes"]), 1)
+        self.assertEqual(len(final["notes"]), 2)
+        self.assertTrue(all(note["locked"] for note in final["notes"]))
         self.assertEqual(final["nodes"][0]["chapter_id"], chapter["id"])
+        self.assertEqual(final["nodes"][0]["scene_id"], scene["id"])
+        self.assertEqual(final["scenes"][0]["content"], "Rain covers the old harbor.")
+
+    def test_existing_database_gets_scene_link_migration(self):
+        legacy_path = Path(self.temporary_directory.name) / "legacy.db"
+        with sqlite3.connect(str(legacy_path)) as connection:
+            connection.execute(
+                """CREATE TABLE nodes (
+                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, label TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT '', node_type TEXT NOT NULL DEFAULT 'plot',
+                    shape TEXT NOT NULL DEFAULT 'rounded', color TEXT NOT NULL DEFAULT 'blue',
+                    x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, chapter_id TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )"""
+            )
+        main.DATABASE_PATH = legacy_path
+        main.init_db()
+        with sqlite3.connect(str(legacy_path)) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(nodes)").fetchall()}
+            scene_table = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scenes'"
+            ).fetchone()
+        self.assertIn("scene_id", columns)
+        self.assertIsNotNone(scene_table)
 
     def test_api_key_protects_writing_data(self):
         main.API_KEY = "test-secret"

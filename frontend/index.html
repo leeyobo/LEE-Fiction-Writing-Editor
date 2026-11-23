@@ -65,6 +65,7 @@
               <span id="chapterIndex" class="chapter-index">CHAPTER 01</span>
               <input id="chapterTitleInput" class="chapter-title-input" value="" aria-label="章节标题" />
               <p id="chapterSubtitle">在安静里，把故事写下来。</p>
+              <div id="linkedNodeBar" class="linked-node-bar" aria-label="关联故事节点"></div>
             </div>
             <textarea id="chapterContent" class="manuscript" spellcheck="false" placeholder="从这里开始写作…"></textarea>
           </article>
@@ -74,15 +75,15 @@
           <div class="map-toolbar">
             <div>
               <p class="eyebrow">STORY MAP</p>
-              <h2>故事地图</h2>
+              <h2>流程画布</h2>
             </div>
-            <div class="map-actions">
-              <button class="node-template" data-type="plot" data-shape="rounded" type="button"><i class="dot blue"></i>情节</button>
-              <button class="node-template" data-type="character" data-shape="pill" type="button"><i class="dot violet"></i>人物</button>
-              <button class="node-template" data-type="place" data-shape="rectangle" type="button"><i class="dot green"></i>地点</button>
-              <button class="node-template" data-type="conflict" data-shape="diamond" type="button"><i class="dot rose"></i>冲突</button>
-              <button class="node-template" data-type="note" data-shape="note" type="button"><i class="dot amber"></i>便签</button>
-              <button id="connectButton" class="connect-button" type="button">连接节点</button>
+            <div class="flow-palette" aria-label="流程图形工具箱">
+              <span class="palette-hint">拖到画布</span>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="rectangle" type="button" title="长方形"><i class="shape-preview rectangle"></i><span>长方形</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="rounded" type="button" title="圆角矩形"><i class="shape-preview rounded"></i><span>圆角</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="diamond" type="button" title="菱形"><i class="shape-preview diamond"></i><span>菱形</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="circle" type="button" title="圆形"><i class="shape-preview circle"></i><span>圆形</span></button>
+              <button id="connectButton" class="connect-button" type="button"><span class="arrow-preview">→</span>箭头</button>
             </div>
           </div>
           <div id="mapViewport" class="map-viewport">
@@ -90,12 +91,21 @@
               <defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>
             </svg>
             <div id="nodeLayer" class="node-layer"></div>
+            <div id="nodeQuickActions" class="node-quick-actions" hidden>
+              <button type="button" data-node-action="note">便签</button>
+              <button type="button" data-node-action="link">连接章节</button>
+              <button type="button" data-node-action="color">颜色</button>
+              <button type="button" data-node-action="settings">设置</button>
+              <div id="quickColorPalette" class="quick-color-palette" hidden>
+                <button type="button" data-quick-color="blue" aria-label="蓝色"></button><button type="button" data-quick-color="violet" aria-label="紫色"></button><button type="button" data-quick-color="green" aria-label="绿色"></button><button type="button" data-quick-color="amber" aria-label="橙色"></button><button type="button" data-quick-color="rose" aria-label="红色"></button><button type="button" data-quick-color="slate" aria-label="灰色"></button>
+              </div>
+            </div>
             <div id="mapEmpty" class="map-empty">
               <div class="empty-glyph">✦</div><h3>让故事在这里展开</h3>
-              <p>添加情节、人物或便签节点，再把它们链接到章节。</p>
-              <button id="emptyAddButton" type="button">添加第一个情节点</button>
+              <p>从上方工具箱拖入图形，用箭头连接，再为图形添加便签或章节链接。</p>
+              <button id="emptyAddButton" type="button">添加第一个长方形</button>
             </div>
-            <div class="map-help">双击已链接节点跳转章节 · 拖动节点调整布局</div>
+            <div class="map-help">拖入图形 · 箭头连接 · 图形菜单添加便签或链接章节</div>
           </div>
         </section>
 
@@ -104,9 +114,11 @@
           <label>节点名称<input id="nodeLabel" maxlength="120" /></label>
           <label>类型<select id="nodeType"><option value="plot">情节</option><option value="character">人物</option><option value="place">地点</option><option value="conflict">冲突</option><option value="note">便签</option></select></label>
           <label>链接章节<select id="nodeChapter"><option value="">不链接章节</option></select></label>
-          <label>便签<textarea id="nodeNote" rows="8" maxlength="5000" placeholder="记录这一段的目的、冲突、伏笔或待办…"></textarea></label>
+          <div id="sceneLinkStatus" class="scene-link-status">尚未创建场景</div>
+          <p class="inspector-tip">便签已移到图形上方快捷操作中，支持多便签、悬停显示和锁定常驻。</p>
           <div class="color-picker" aria-label="节点颜色"><button data-color="blue"></button><button data-color="violet"></button><button data-color="green"></button><button data-color="amber"></button><button data-color="rose"></button><button data-color="slate"></button></div>
-          <button id="jumpChapterButton" class="wide-button" type="button">打开链接章节</button>
+          <button id="createSceneButton" class="scene-create-button" type="button">从节点创建场景</button>
+          <button id="jumpChapterButton" class="wide-button" type="button">打开链接内容</button>
           <button id="deleteNodeButton" class="danger-button" type="button">删除节点</button>
         </aside>
       </main>
@@ -123,6 +135,7 @@
         <label>服务器地址<input id="serverUrl" type="url" placeholder="https://fiction.example.com" required /></label>
         <label>API Key（可选）<input id="apiKey" type="password" autocomplete="off" placeholder="后端未设置时留空" /></label>
         <div id="connectionResult" class="connection-result"></div>
+        <p class="connection-help">本地开发：在项目根目录运行 <code>python dev.py</code>，一次启动前端与后端。</p>
         <div class="modal-actions"><button id="testConnection" class="secondary-button" type="button">测试连接</button><button id="saveSettings" class="primary-button" type="button">保存并连接</button></div>
       </form>
     </dialog>
@@ -132,6 +145,26 @@
         <div class="modal-heading"><div><p class="eyebrow">LIBRARY</p><h2>我的作品</h2></div><button value="cancel" type="submit">×</button></div>
         <div id="projectList" class="project-list"></div>
         <div class="new-project-row"><input id="newProjectTitle" placeholder="新作品名称" maxlength="100" /><button id="createProjectButton" type="button">新建作品</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="noteDialog" class="modal note-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">NODE NOTES</p><h2>节点便签</h2></div><button value="cancel" type="submit">×</button></div>
+        <div id="noteList" class="note-list"></div>
+        <input id="editingNoteId" type="hidden" />
+        <label>章节梗概或提示<textarea id="noteContent" rows="7" maxlength="5000" placeholder="记录本节点的章节梗概、冲突、伏笔或待办…"></textarea></label>
+        <label class="lock-option"><input id="noteLocked" type="checkbox" />锁定便签，始终显示在图形上方</label>
+        <div class="modal-actions note-actions"><button id="newNoteButton" class="secondary-button" type="button">新建便签</button><button id="deleteNoteButton" class="danger-inline" type="button" hidden>删除</button><button id="saveNoteButton" class="primary-button" type="button">保存便签</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="chapterLinkDialog" class="modal link-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">CHAPTER LINK</p><h2>选择链接章节</h2></div><button value="cancel" type="submit">×</button></div>
+        <p class="modal-copy">链接后，点击图形主体即可直接进入对应章节。</p>
+        <div id="chapterLinkList" class="chapter-link-list"></div>
+        <button id="unlinkChapterButton" class="danger-button" type="button">断开章节链接</button>
       </form>
     </dialog>
 

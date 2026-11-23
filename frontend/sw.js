@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v2-blue";
+const CACHE = "motu-shell-v5-flowchart";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

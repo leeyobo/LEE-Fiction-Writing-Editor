@@ -9,7 +9,10 @@ const state = {
   projects: [],
   project: null,
   activeChapterId: localStorage.getItem("motu.activeChapterId") || null,
+  activeSceneId: localStorage.getItem("motu.activeSceneId") || null,
   selectedNodeId: null,
+  editingNoteId: null,
+  linkTargetNodeId: null,
   connectSourceId: null,
   chapterTimer: null,
   nodeTimer: null,
@@ -52,6 +55,16 @@ function toast(message) {
   state.toastTimer = setTimeout(() => element.classList.remove("show"), 2600);
 }
 
+function requireProject(actionLabel = "执行此操作") {
+  if (state.project) return true;
+  const message = `无法${actionLabel}：尚未连接写作服务器`;
+  toast(message);
+  $("#connectionResult").textContent = `${message}。本地开发请在项目根目录运行 python dev.py。`;
+  $("#connectionResult").className = "connection-result error";
+  if (!$("#settingsDialog").open) $("#settingsDialog").showModal();
+  return false;
+}
+
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
@@ -64,6 +77,14 @@ function wordCount(text = "") {
 
 function activeChapter() {
   return state.project?.chapters.find(chapter => chapter.id === state.activeChapterId) || null;
+}
+
+function activeScene() {
+  return state.project?.scenes?.find(scene => scene.id === state.activeSceneId) || null;
+}
+
+function activeDocument() {
+  return activeScene() || activeChapter();
 }
 
 async function boot() {
@@ -98,9 +119,15 @@ async function connect() {
 async function loadProject(projectId) {
   setSaveState("正在载入", "saving");
   state.project = await api(`/api/projects/${projectId}`);
+  state.project.scenes ||= [];
+  state.project.notes ||= [];
   localStorage.setItem("motu.projectId", projectId);
   if (!state.project.chapters.some(chapter => chapter.id === state.activeChapterId)) {
     state.activeChapterId = state.project.chapters[0]?.id || null;
+  }
+  if (!state.project.scenes.some(scene => scene.id === state.activeSceneId && scene.chapter_id === state.activeChapterId)) {
+    state.activeSceneId = null;
+    localStorage.removeItem("motu.activeSceneId");
   }
   state.selectedNodeId = null;
   state.connectSourceId = null;
@@ -120,27 +147,58 @@ function renderAll() {
 
 function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase()) {
   if (!state.project) return;
-  const chapters = state.project.chapters.filter(chapter => chapter.title.toLowerCase().includes(filter));
+  const chapters = state.project.chapters.filter(chapter => {
+    const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
+    return chapter.title.toLowerCase().includes(filter) || scenes.some(scene => scene.title.toLowerCase().includes(filter));
+  });
   $("#chapterList").innerHTML = chapters.map(chapter => {
     const index = state.project.chapters.indexOf(chapter) + 1;
-    return `<li class="chapter-item ${chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
-      <span class="chapter-number">${String(index).padStart(2, "0")}</span>
-      <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${chapter.content ? escapeHtml(chapter.content.slice(0, 18).replace(/\s+/g, " ")) : "还没有正文"}</small></span>
-      <span class="chapter-words">${wordCount(chapter.content)}</span>
+    const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
+    return `<li class="chapter-group">
+      <div class="chapter-item ${chapter.id === state.activeChapterId && !state.activeSceneId ? "active" : ""}" data-chapter-id="${chapter.id}">
+        <span class="chapter-number">${String(index).padStart(2, "0")}</span>
+        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${scenes.length ? `${scenes.length} 个场景` : (chapter.content ? escapeHtml(chapter.content.slice(0, 18).replace(/\s+/g, " ")) : "还没有正文")}</small></span>
+        <span class="chapter-words">${wordCount(chapter.content)}</span>
+      </div>
+      ${scenes.length ? `<ol class="scene-list">${scenes.map(scene => `<li class="scene-item ${scene.id === state.activeSceneId ? "active" : ""}" data-scene-id="${scene.id}"><span class="scene-glyph">◇</span><span class="scene-title">${escapeHtml(scene.title)}</span><span class="scene-words">${wordCount(scene.content)}</span></li>`).join("")}</ol>` : ""}
     </li>`;
   }).join("");
   $("#chapterCount").textContent = `${state.project.chapters.length} 章`;
-  $("#totalWords").textContent = state.project.chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0).toLocaleString();
+  const chapterWords = state.project.chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0);
+  const sceneWords = state.project.scenes.reduce((sum, scene) => sum + wordCount(scene.content), 0);
+  $("#totalWords").textContent = (chapterWords + sceneWords).toLocaleString();
 }
 
 function renderEditor() {
   const chapter = activeChapter();
   if (!chapter) return;
-  const index = state.project.chapters.indexOf(chapter) + 1;
-  $("#chapterIndex").textContent = `CHAPTER ${String(index).padStart(2, "0")}`;
-  $("#chapterTitleInput").value = chapter.title;
-  $("#chapterContent").value = chapter.content;
-  $("#chapterWords").textContent = `${wordCount(chapter.content)} 字`;
+  const scene = activeScene();
+  const document = scene || chapter;
+  const chapterIndex = state.project.chapters.indexOf(chapter) + 1;
+  if (scene) {
+    const scenes = state.project.scenes.filter(item => item.chapter_id === chapter.id);
+    const sceneIndex = scenes.indexOf(scene) + 1;
+    $("#chapterIndex").textContent = `SCENE ${String(sceneIndex).padStart(2, "0")} · CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
+    $("#chapterSubtitle").textContent = `所属章节：${chapter.title}`;
+  } else {
+    $("#chapterIndex").textContent = `CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
+    $("#chapterSubtitle").textContent = "在安静里，把故事写下来。";
+  }
+  $("#chapterTitleInput").value = document.title;
+  $("#chapterContent").value = document.content;
+  $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
+  renderLinkedNodes();
+}
+
+function renderLinkedNodes() {
+  if (!state.project) return;
+  const scene = activeScene();
+  const nodes = scene
+    ? state.project.nodes.filter(node => node.scene_id === scene.id)
+    : state.project.nodes.filter(node => node.chapter_id === state.activeChapterId && !node.scene_id);
+  $("#linkedNodeBar").innerHTML = nodes.length
+    ? `<span class="linked-node-label">关联故事节点</span>${nodes.map(node => `<button class="linked-node-pill" type="button" data-linked-node-id="${node.id}">${escapeHtml(node.label)}</button>`).join("")}`
+    : "";
 }
 
 function renderChapterOptions() {
@@ -152,12 +210,21 @@ function renderChapterOptions() {
 function renderMap() {
   if (!state.project) return;
   const chapterMap = new Map(state.project.chapters.map(chapter => [chapter.id, chapter.title]));
-  $("#nodeLayer").innerHTML = state.project.nodes.map(node => `<article class="story-node shape-${node.shape} ${node.id === state.selectedNodeId ? "selected" : ""}" data-node-id="${node.id}" data-color="${node.color}" style="left:${node.x}px;top:${node.y}px" tabindex="0">
-    <span class="node-link-type">${nodeTypeNames[node.node_type] || "节点"}</span>
+  const sceneMap = new Map(state.project.scenes.map(scene => [scene.id, scene.title]));
+  $("#nodeLayer").innerHTML = state.project.nodes.map(node => {
+    const notes = state.project.notes.filter(note => note.node_id === node.id);
+    const noteCards = notes.map(note => `<div class="node-note-card ${note.locked ? "locked" : ""}" data-note-id="${note.id}" title="点击编辑便签">${escapeHtml(note.content)}</div>`).join("");
+    return `<article class="story-node shape-${node.shape} ${node.id === state.selectedNodeId ? "selected" : ""}" data-node-id="${node.id}" data-color="${node.color}" style="left:${node.x}px;top:${node.y}px" tabindex="0">
+    <button class="node-menu-button" type="button" title="节点操作">•••</button>
+    ${notes.length ? `<div class="node-notes-popover has-notes ${notes.some(note => note.locked) ? "has-locked" : ""}">${noteCards}</div>` : ""}
+    <div class="node-inner"><span class="node-type">${nodeTypeNames[node.node_type] || "节点"}</span>
     <strong class="node-label">${escapeHtml(node.label)}</strong>
-    ${node.chapter_id ? `<span class="node-link">${escapeHtml(chapterMap.get(node.chapter_id) || "章节已删除")}</span>` : ""}
-  </article>`).join("");
+    ${node.scene_id ? `<span class="node-link">场景 · ${escapeHtml(sceneMap.get(node.scene_id) || "场景已删除")}</span>` : (node.chapter_id ? `<span class="node-link">${escapeHtml(chapterMap.get(node.chapter_id) || "章节已删除")}</span>` : "")}
+    </div>
+  </article>`;
+  }).join("");
   $("#mapEmpty").classList.toggle("hidden", state.project.nodes.length > 0);
+  if (state.selectedNodeId) requestAnimationFrame(() => positionQuickActions(state.selectedNodeId));
   requestAnimationFrame(renderEdges);
 }
 
@@ -181,7 +248,21 @@ function renderEdges() {
 function selectChapter(chapterId) {
   if (!state.project?.chapters.some(chapter => chapter.id === chapterId)) return;
   state.activeChapterId = chapterId;
+  state.activeSceneId = null;
   localStorage.setItem("motu.activeChapterId", chapterId);
+  localStorage.removeItem("motu.activeSceneId");
+  renderChapters();
+  renderEditor();
+  switchView("write");
+}
+
+function selectScene(sceneId) {
+  const scene = state.project?.scenes.find(item => item.id === sceneId);
+  if (!scene) return;
+  state.activeChapterId = scene.chapter_id;
+  state.activeSceneId = scene.id;
+  localStorage.setItem("motu.activeChapterId", scene.chapter_id);
+  localStorage.setItem("motu.activeSceneId", scene.id);
   renderChapters();
   renderEditor();
   switchView("write");
@@ -197,19 +278,21 @@ function switchView(view) {
   if (view === "map") requestAnimationFrame(renderMap);
 }
 
-function queueChapterSave() {
-  const chapter = activeChapter();
-  if (!chapter) return;
-  chapter.title = $("#chapterTitleInput").value.trim() || "未命名章节";
-  chapter.content = $("#chapterContent").value;
-  $("#chapterWords").textContent = `${wordCount(chapter.content)} 字`;
+function queueDocumentSave() {
+  const document = activeDocument();
+  const scene = activeScene();
+  if (!document) return;
+  document.title = $("#chapterTitleInput").value.trim() || (scene ? "未命名场景" : "未命名章节");
+  document.content = $("#chapterContent").value;
+  $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
   renderChapters();
   setSaveState("保存中", "saving");
   clearTimeout(state.chapterTimer);
   state.chapterTimer = setTimeout(async () => {
     try {
-      const updated = await api(`/api/chapters/${chapter.id}`, { method: "PATCH", body: JSON.stringify({ title: chapter.title, content: chapter.content }) });
-      Object.assign(chapter, updated);
+      const path = scene ? `/api/scenes/${document.id}` : `/api/chapters/${document.id}`;
+      const updated = await api(path, { method: "PATCH", body: JSON.stringify({ title: document.title, content: document.content }) });
+      Object.assign(document, updated);
       setSaveState("已同步", "saved");
     } catch (error) {
       setSaveState("保存失败", "error"); toast(error.message);
@@ -218,7 +301,7 @@ function queueChapterSave() {
 }
 
 async function addChapter() {
-  if (!state.project) return;
+  if (!requireProject("新建章节")) return;
   try {
     const chapter = await api(`/api/projects/${state.project.id}/chapters`, { method: "POST", body: JSON.stringify({ title: `第 ${state.project.chapters.length + 1} 章` }) });
     state.project.chapters.push(chapter);
@@ -229,17 +312,121 @@ async function addChapter() {
   } catch (error) { toast(error.message); }
 }
 
-async function addNode(type = "plot", shape = "rounded") {
-  if (!state.project) return;
+async function addNode(type = "plot", shape = "rounded", position = null) {
+  if (!requireProject("添加故事节点")) return;
   const viewport = $("#mapViewport");
-  const x = Math.max(24, viewport.clientWidth / 2 - 84 + (Math.random() - .5) * 100);
-  const y = Math.max(24, viewport.clientHeight / 2 - 50 + (Math.random() - .5) * 80);
+  const x = position?.x ?? Math.max(24, viewport.clientWidth / 2 - 84 + (Math.random() - .5) * 100);
+  const y = position?.y ?? Math.max(24, viewport.clientHeight / 2 - 50 + (Math.random() - .5) * 80);
   try {
-    const node = await api(`/api/projects/${state.project.id}/nodes`, { method: "POST", body: JSON.stringify({ label: type === "note" ? "新便签" : `新${nodeTypeNames[type]}`, node_type: type, shape, color: nodeTypeColors[type], x, y, note: "", chapter_id: null }) });
+    const shapeNames = { rectangle: "新流程", rounded: "新节点", diamond: "新判断", circle: "新节点" };
+    const node = await api(`/api/projects/${state.project.id}/nodes`, { method: "POST", body: JSON.stringify({ label: shapeNames[shape] || "新节点", node_type: type, shape, color: nodeTypeColors[type], x, y, note: "", chapter_id: null }) });
     state.project.nodes.push(node);
     state.selectedNodeId = node.id;
     renderMap();
-    openInspector(node.id);
+    positionQuickActions(node.id);
+  } catch (error) { toast(error.message); }
+}
+
+function positionQuickActions(nodeId) {
+  const node = state.project?.nodes.find(item => item.id === nodeId);
+  const element = document.querySelector(`.story-node[data-node-id="${nodeId}"]`);
+  const bar = $("#nodeQuickActions");
+  if (!node || !element) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.style.left = `${Math.max(8, node.x + element.offsetWidth / 2)}px`;
+  bar.style.top = `${Math.max(8, node.y - 54)}px`;
+  bar.style.transform = "translateX(-50%)";
+  const linkButton = bar.querySelector('[data-node-action="link"]');
+  linkButton.textContent = node.chapter_id ? "更改章节" : "连接章节";
+}
+
+function selectNodeForActions(nodeId) {
+  state.selectedNodeId = nodeId;
+  $("#quickColorPalette").hidden = true;
+  renderMap();
+  requestAnimationFrame(() => positionQuickActions(nodeId));
+}
+
+function notesForSelectedNode() {
+  return state.project?.notes.filter(note => note.node_id === state.selectedNodeId) || [];
+}
+
+function renderNoteDialog(noteId = state.editingNoteId) {
+  const notes = notesForSelectedNode();
+  state.editingNoteId = notes.some(note => note.id === noteId) ? noteId : null;
+  $("#noteList").innerHTML = notes.map(note => `<button class="note-list-item ${note.id === state.editingNoteId ? "active" : ""}" type="button" data-dialog-note-id="${note.id}"><span>${escapeHtml(note.content.replace(/\s+/g, " "))}</span><small>${note.locked ? "已锁定" : "悬停显示"}</small></button>`).join("");
+  const note = notes.find(item => item.id === state.editingNoteId);
+  $("#editingNoteId").value = note?.id || "";
+  $("#noteContent").value = note?.content || "";
+  $("#noteLocked").checked = Boolean(note?.locked);
+  $("#deleteNoteButton").hidden = !note;
+}
+
+function openNoteDialog(noteId = null) {
+  if (!state.selectedNodeId) return;
+  renderNoteDialog(noteId);
+  if (!$("#noteDialog").open) $("#noteDialog").showModal();
+  requestAnimationFrame(() => $("#noteContent").focus());
+}
+
+async function saveCurrentNote() {
+  const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+  const content = $("#noteContent").value.trim();
+  if (!node || !content) { toast("请先填写便签内容"); return; }
+  const payload = { content, locked: $("#noteLocked").checked };
+  try {
+    if (state.editingNoteId) {
+      const updated = await api(`/api/notes/${state.editingNoteId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      Object.assign(state.project.notes.find(note => note.id === updated.id), updated);
+    } else {
+      const created = await api(`/api/nodes/${node.id}/notes`, { method: "POST", body: JSON.stringify(payload) });
+      state.project.notes.push(created);
+      state.editingNoteId = created.id;
+    }
+    renderMap();
+    renderNoteDialog(state.editingNoteId);
+    toast("便签已保存");
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteCurrentNote() {
+  if (!state.editingNoteId) return;
+  try {
+    await api(`/api/notes/${state.editingNoteId}`, { method: "DELETE" });
+    state.project.notes = state.project.notes.filter(note => note.id !== state.editingNoteId);
+    state.editingNoteId = null;
+    renderMap();
+    renderNoteDialog();
+    toast("便签已删除");
+  } catch (error) { toast(error.message); }
+}
+
+function openChapterLinkDialog() {
+  const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+  if (!node) return;
+  $("#chapterLinkList").innerHTML = state.project.chapters.map((chapter, index) => `<button class="chapter-link-option ${chapter.id === node.chapter_id ? "active" : ""}" type="button" data-link-chapter-id="${chapter.id}"><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span></button>`).join("");
+  $("#unlinkChapterButton").hidden = !node.chapter_id;
+  if (!$("#chapterLinkDialog").open) $("#chapterLinkDialog").showModal();
+}
+
+function startChapterLinkMode() {
+  if (!state.selectedNodeId) return;
+  state.linkTargetNodeId = state.selectedNodeId;
+  $(".chapter-panel").classList.add("link-target-mode");
+  toast("请从左侧作品目录选择要链接的章节");
+}
+
+async function setNodeChapterLink(chapterId) {
+  const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+  if (!node) return;
+  try {
+    const updated = await api(`/api/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify({ chapter_id: chapterId, scene_id: null }) });
+    Object.assign(node, updated);
+    state.linkTargetNodeId = null;
+    $(".chapter-panel").classList.remove("link-target-mode");
+    renderMap();
+    if ($("#chapterLinkDialog").open) $("#chapterLinkDialog").close();
+    toast(chapterId ? "章节链接已建立；点击图形即可进入章节" : "章节链接已断开");
   } catch (error) { toast(error.message); }
 }
 
@@ -250,14 +437,19 @@ function openInspector(nodeId) {
   $("#nodeLabel")?.remove();
   $("#nodeType").value = node.node_type;
   $("#nodeChapter").value = node.chapter_id || "";
-  $("#nodeNote").value = node.note || "";
+  $("#nodeChapter").disabled = Boolean(node.scene_id);
   let labelInput = document.createElement("label");
   labelInput.id = "nodeLabel";
   labelInput.innerHTML = `节点标题<input id="nodeLabelInput" maxlength="120" value="${escapeHtml(node.label)}" />`;
   $("#nodeType").closest("label").before(labelInput);
   $("#nodeLabelInput").addEventListener("input", queueNodeSave);
   $$(".color-picker button").forEach(button => button.classList.toggle("active", button.dataset.color === node.color));
-  $("#jumpChapterButton").disabled = !node.chapter_id;
+  const scene = state.project.scenes.find(item => item.id === node.scene_id);
+  $("#createSceneButton").hidden = Boolean(scene);
+  $("#jumpChapterButton").disabled = !node.chapter_id && !scene;
+  $("#jumpChapterButton").textContent = scene ? "打开链接场景" : "打开链接章节";
+  $("#sceneLinkStatus").className = `scene-link-status ${scene ? "linked" : ""}`;
+  $("#sceneLinkStatus").textContent = scene ? `已链接场景：${scene.title}` : "尚未链接场景；创建后可在地图和正文之间双向跳转。";
   $("#inspector")?.classList.remove("hidden");
   $(".inspector").classList.remove("hidden");
   renderMap();
@@ -269,11 +461,10 @@ function queueNodeSave(event) {
   if (event?.target?.id === "nodeLabelInput") node.label = event.target.value || "未命名节点";
   if (event?.target?.id === "nodeType") node.node_type = event.target.value;
   if (event?.target?.id === "nodeChapter") node.chapter_id = event.target.value || null;
-  if (event?.target?.id === "nodeNote") node.note = event.target.value;
   renderMap();
-  $("#jumpChapterButton").disabled = !node.chapter_id;
+  $("#jumpChapterButton").disabled = !node.chapter_id && !node.scene_id;
   clearTimeout(state.nodeTimer);
-  state.nodeTimer = setTimeout(() => saveNode(node, { label: node.label, note: node.note, node_type: node.node_type, chapter_id: node.chapter_id, color: node.color }), 450);
+  state.nodeTimer = setTimeout(() => saveNode(node, { label: node.label, node_type: node.node_type, chapter_id: node.chapter_id, color: node.color }), 450);
 }
 
 async function saveNode(node, payload) {
@@ -281,6 +472,51 @@ async function saveNode(node, payload) {
     const updated = await api(`/api/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify(payload) });
     Object.assign(node, updated); setSaveState("已同步", "saved");
   } catch (error) { setSaveState("保存失败", "error"); toast(error.message); }
+}
+
+async function createSceneFromSelectedNode() {
+  const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+  if (!node) return;
+  const chapterId = node.chapter_id || state.activeChapterId || state.project.chapters[0]?.id;
+  if (!chapterId) { toast("请先创建一个章节"); return; }
+  $("#createSceneButton").disabled = true;
+  $("#createSceneButton").textContent = "正在创建…";
+  try {
+    const result = await api(`/api/nodes/${node.id}/scene`, {
+      method: "POST",
+      body: JSON.stringify({ chapter_id: chapterId, title: node.label }),
+    });
+    state.project.scenes.push(result.scene);
+    Object.assign(node, result.node);
+    renderAll();
+    $(".inspector").classList.add("hidden");
+    selectScene(result.scene.id);
+    toast("场景已创建，并与故事节点建立双向链接");
+  } catch (error) {
+    toast(error.message);
+    $("#createSceneButton").disabled = false;
+    $("#createSceneButton").textContent = "从节点创建场景";
+  }
+}
+
+function openNodeLinkedContent(node) {
+  if (!node?.scene_id && !node?.chapter_id) return;
+  $(".inspector").classList.add("hidden");
+  if (node.scene_id) selectScene(node.scene_id);
+  else selectChapter(node.chapter_id);
+}
+
+function focusNodeOnMap(nodeId) {
+  if (!state.project?.nodes.some(node => node.id === nodeId)) return;
+  state.selectedNodeId = nodeId;
+  switchView("map");
+  openInspector(nodeId);
+  requestAnimationFrame(() => {
+    const element = document.querySelector(`.story-node[data-node-id="${nodeId}"]`);
+    if (!element) return;
+    element.classList.add("focus-pulse");
+    setTimeout(() => element.classList.remove("focus-pulse"), 1200);
+  });
 }
 
 async function connectNode(targetId) {
@@ -295,7 +531,7 @@ async function connectNode(targetId) {
     state.project.edges.push(edge);
     state.connectSourceId = null;
     $("#connectButton").classList.remove("active");
-    $("#connectButton").textContent = "连接节点";
+    $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
     renderEdges(); toast("节点已连接");
   } catch (error) { state.connectSourceId = null; toast(error.message); }
 }
@@ -304,7 +540,7 @@ function bindNodeInteractions() {
   const layer = $("#nodeLayer");
   layer.addEventListener("pointerdown", event => {
     const element = event.target.closest(".story-node");
-    if (!element || $("#connectButton").classList.contains("active")) return;
+    if (!element || event.target.closest(".node-note-card, .node-menu-button") || $("#connectButton").classList.contains("active")) return;
     const node = state.project.nodes.find(item => item.id === element.dataset.nodeId);
     const viewport = $("#mapViewport").getBoundingClientRect();
     const startX = event.clientX; const startY = event.clientY; const originX = node.x; const originY = node.y;
@@ -316,39 +552,50 @@ function bindNodeInteractions() {
       node.x = Math.max(0, Math.min(viewport.width - element.offsetWidth, originX + dx));
       node.y = Math.max(0, Math.min(viewport.height - element.offsetHeight, originY + dy));
       element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; renderEdges();
+      if (state.selectedNodeId === node.id) positionQuickActions(node.id);
     };
     const up = () => {
       element.removeEventListener("pointermove", move); element.removeEventListener("pointerup", up);
-      if (moved) saveNode(node, { x: node.x, y: node.y }); else openInspector(node.id);
+      if (moved) saveNode(node, { x: node.x, y: node.y });
+      else if (node.chapter_id || node.scene_id) openNodeLinkedContent(node);
+      else selectNodeForActions(node.id);
     };
     element.addEventListener("pointermove", move); element.addEventListener("pointerup", up);
   });
   layer.addEventListener("click", event => {
     const element = event.target.closest(".story-node");
-    if (element && $("#connectButton").classList.contains("active")) connectNode(element.dataset.nodeId);
-  });
-  layer.addEventListener("dblclick", event => {
-    const element = event.target.closest(".story-node");
-    const node = element && state.project.nodes.find(item => item.id === element.dataset.nodeId);
-    if (node?.chapter_id) selectChapter(node.chapter_id);
+    if (!element) return;
+    if (event.target.closest(".node-menu-button")) { selectNodeForActions(element.dataset.nodeId); return; }
+    const noteCard = event.target.closest(".node-note-card");
+    if (noteCard) { state.selectedNodeId = element.dataset.nodeId; openNoteDialog(noteCard.dataset.noteId); return; }
+    if ($("#connectButton").classList.contains("active")) connectNode(element.dataset.nodeId);
   });
 }
 
 function bindEvents() {
   $$(".view-button").forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
   $("#chapterList").addEventListener("click", event => {
+    const sceneItem = event.target.closest(".scene-item");
+    if (state.linkTargetNodeId) {
+      const scene = sceneItem && state.project.scenes.find(item => item.id === sceneItem.dataset.sceneId);
+      const chapterItem = event.target.closest(".chapter-item");
+      const chapterId = scene?.chapter_id || chapterItem?.dataset.chapterId;
+      if (chapterId) { state.selectedNodeId = state.linkTargetNodeId; setNodeChapterLink(chapterId); }
+      return;
+    }
+    if (sceneItem) { selectScene(sceneItem.dataset.sceneId); return; }
     const item = event.target.closest(".chapter-item"); if (item) selectChapter(item.dataset.chapterId);
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
   $("#addChapterButton").addEventListener("click", addChapter);
-  $("#chapterTitleInput").addEventListener("input", queueChapterSave);
-  $("#chapterContent").addEventListener("input", queueChapterSave);
+  $("#chapterTitleInput").addEventListener("input", queueDocumentSave);
+  $("#chapterContent").addEventListener("input", queueDocumentSave);
   $$(".format-tools button").forEach(button => button.addEventListener("click", () => {
     const editor = $("#chapterContent");
     const start = editor.selectionStart; const end = editor.selectionEnd; const selected = editor.value.slice(start, end);
     if (button.dataset.insert) editor.setRangeText(selected ? `${button.dataset.insert.slice(0, button.dataset.insert.length / 2)}${selected}${button.dataset.insert.slice(button.dataset.insert.length / 2)}` : button.dataset.insert, start, end, "end");
     else if (button.dataset.prefix) editor.setRangeText(button.dataset.prefix + selected, start, end, "end");
-    editor.focus(); queueChapterSave();
+    editor.focus(); queueDocumentSave();
   }));
   $("#focusButton").addEventListener("click", () => $("#app").classList.toggle("focus-mode"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
@@ -360,21 +607,64 @@ function bindEvents() {
     const item = event.target.closest(".project-option");
     if (item) { $("#projectDialog").close(); loadProject(item.dataset.projectId).catch(error => toast(error.message)); }
   });
-  $$(".node-template").forEach(button => button.addEventListener("click", () => addNode(button.dataset.type, button.dataset.shape)));
-  $("#emptyAddButton").addEventListener("click", () => addNode());
+  $$(".node-template").forEach(button => {
+    button.addEventListener("click", () => addNode(button.dataset.type, button.dataset.shape));
+    button.addEventListener("dragstart", event => {
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData("application/x-motu-shape", JSON.stringify({ type: button.dataset.type, shape: button.dataset.shape }));
+    });
+  });
+  $("#mapViewport").addEventListener("dragover", event => { if (event.dataTransfer.types.includes("application/x-motu-shape")) event.preventDefault(); });
+  $("#mapViewport").addEventListener("drop", event => {
+    const raw = event.dataTransfer.getData("application/x-motu-shape");
+    if (!raw) return;
+    event.preventDefault();
+    const item = JSON.parse(raw); const rect = $("#mapViewport").getBoundingClientRect();
+    addNode(item.type, item.shape, { x: Math.max(8, event.clientX - rect.left - 80), y: Math.max(8, event.clientY - rect.top - 40) });
+  });
+  $("#mapViewport").addEventListener("click", event => {
+    if (event.target === $("#mapViewport") || event.target === $("#nodeLayer")) { $("#nodeQuickActions").hidden = true; state.selectedNodeId = null; renderMap(); }
+  });
+  $("#emptyAddButton").addEventListener("click", () => addNode("plot", "rectangle"));
   $("#connectButton").addEventListener("click", event => {
     event.currentTarget.classList.toggle("active"); state.connectSourceId = null;
-    event.currentTarget.textContent = event.currentTarget.classList.contains("active") ? "选择起点" : "连接节点";
+    event.currentTarget.innerHTML = event.currentTarget.classList.contains("active") ? '<span class="arrow-preview">→</span>选起点' : '<span class="arrow-preview">→</span>箭头';
   });
+  $("#nodeQuickActions").addEventListener("click", event => {
+    const action = event.target.closest("[data-node-action]")?.dataset.nodeAction;
+    if (action === "note") openNoteDialog();
+    if (action === "link") {
+      const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+      if (node?.chapter_id) openChapterLinkDialog(); else startChapterLinkMode();
+    }
+    if (action === "color") $("#quickColorPalette").hidden = !$("#quickColorPalette").hidden;
+    if (action === "settings") openInspector(state.selectedNodeId);
+  });
+  $("#quickColorPalette").addEventListener("click", event => {
+    const color = event.target.closest("[data-quick-color]")?.dataset.quickColor;
+    const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+    if (!color || !node) return;
+    node.color = color; saveNode(node, { color }); $("#quickColorPalette").hidden = true; renderMap();
+  });
+  $("#noteList").addEventListener("click", event => { const id = event.target.closest("[data-dialog-note-id]")?.dataset.dialogNoteId; if (id) renderNoteDialog(id); });
+  $("#newNoteButton").addEventListener("click", () => { state.editingNoteId = null; renderNoteDialog(); $("#noteContent").focus(); });
+  $("#saveNoteButton").addEventListener("click", saveCurrentNote);
+  $("#deleteNoteButton").addEventListener("click", deleteCurrentNote);
+  $("#chapterLinkList").addEventListener("click", event => { const id = event.target.closest("[data-link-chapter-id]")?.dataset.linkChapterId; if (id) setNodeChapterLink(id); });
+  $("#unlinkChapterButton").addEventListener("click", () => setNodeChapterLink(null));
   $("#nodeType").addEventListener("change", queueNodeSave);
   $("#nodeChapter").addEventListener("change", queueNodeSave);
-  $("#nodeNote").addEventListener("input", queueNodeSave);
+  $("#createSceneButton").addEventListener("click", createSceneFromSelectedNode);
   $$(".color-picker button").forEach(button => button.addEventListener("click", () => {
     const node = state.project?.nodes.find(item => item.id === state.selectedNodeId); if (!node) return;
     node.color = button.dataset.color; queueNodeSave(); openInspector(node.id);
   }));
   $("#jumpChapterButton").addEventListener("click", () => {
-    const node = state.project?.nodes.find(item => item.id === state.selectedNodeId); if (node?.chapter_id) selectChapter(node.chapter_id);
+    const node = state.project?.nodes.find(item => item.id === state.selectedNodeId); openNodeLinkedContent(node);
+  });
+  $("#linkedNodeBar").addEventListener("click", event => {
+    const button = event.target.closest("[data-linked-node-id]");
+    if (button) focusNodeOnMap(button.dataset.linkedNodeId);
   });
   $("#deleteNodeButton").addEventListener("click", deleteSelectedNode);
   $(".inspector-heading button").addEventListener("click", () => $(".inspector").classList.add("hidden"));
@@ -405,6 +695,10 @@ async function saveSettings() {
 }
 
 function openProjectDialog() {
+  if (!state.project && !state.projects.length) {
+    requireProject("打开作品库");
+    return;
+  }
   $("#projectList").innerHTML = state.projects.map(project => `<button class="project-option" type="button" data-project-id="${project.id}"><strong>${escapeHtml(project.title)}</strong><small>${project.id === state.project?.id ? "当前作品" : "打开"}</small></button>`).join("");
   $("#projectDialog").showModal();
 }
@@ -425,7 +719,8 @@ async function deleteSelectedNode() {
     await api(`/api/nodes/${node.id}`, { method: "DELETE" });
     state.project.nodes = state.project.nodes.filter(item => item.id !== node.id);
     state.project.edges = state.project.edges.filter(edge => edge.source_id !== node.id && edge.target_id !== node.id);
-    state.selectedNodeId = null; $(".inspector").classList.add("hidden"); renderMap(); toast("节点已删除");
+    state.project.notes = state.project.notes.filter(note => note.node_id !== node.id);
+    state.selectedNodeId = null; $(".inspector").classList.add("hidden"); $("#nodeQuickActions").hidden = true; renderMap(); toast("节点已删除");
   } catch (error) { toast(error.message); }
 }
 

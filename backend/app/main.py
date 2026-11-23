@@ -61,6 +61,17 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS scenes (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                chapter_id TEXT NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -72,6 +83,7 @@ def init_db() -> None:
                 x REAL NOT NULL DEFAULT 0,
                 y REAL NOT NULL DEFAULT 0,
                 chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL,
+                scene_id TEXT REFERENCES scenes(id) ON DELETE SET NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -86,11 +98,35 @@ def init_db() -> None:
                 UNIQUE(project_id, source_id, target_id)
             );
 
+            CREATE TABLE IF NOT EXISTS node_notes (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                content TEXT NOT NULL,
+                locked INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, position);
+            CREATE INDEX IF NOT EXISTS idx_scenes_chapter ON scenes(chapter_id, position);
             CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
             CREATE INDEX IF NOT EXISTS idx_edges_project ON edges(project_id);
+            CREATE INDEX IF NOT EXISTS idx_node_notes_node ON node_notes(node_id, position);
             """
         )
+        node_columns = {row["name"] for row in connection.execute("PRAGMA table_info(nodes)").fetchall()}
+        if "scene_id" not in node_columns:
+            connection.execute("ALTER TABLE nodes ADD COLUMN scene_id TEXT REFERENCES scenes(id) ON DELETE SET NULL")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_nodes_scene ON nodes(scene_id)")
+        connection.execute(
+            """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
+               SELECT 'note_' || lower(hex(randomblob(16))), n.project_id, n.id, n.note, 0, 0, n.updated_at, n.updated_at
+               FROM nodes n
+               WHERE trim(n.note) <> '' AND NOT EXISTS (SELECT 1 FROM node_notes nn WHERE nn.node_id = n.id)"""
+        )
+        connection.execute("UPDATE nodes SET note = '' WHERE trim(note) <> ''")
 
 
 async def authorize(authorization: Optional[str] = Header(default=None)) -> None:
@@ -121,8 +157,34 @@ class ChapterUpdate(BaseModel):
     position: Optional[int] = Field(default=None, ge=0)
 
 
+class SceneCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
+class SceneUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    content: Optional[str] = None
+    position: Optional[int] = Field(default=None, ge=0)
+
+
+class NodeSceneCreate(BaseModel):
+    chapter_id: Optional[str] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+
+
 NodeType = Literal["plot", "character", "place", "conflict", "note"]
-NodeShape = Literal["rounded", "rectangle", "diamond", "pill", "note"]
+NodeShape = Literal["rounded", "rectangle", "diamond", "circle", "pill", "note"]
+
+
+class NodeNoteCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=5000)
+    locked: bool = False
+
+
+class NodeNoteUpdate(BaseModel):
+    content: Optional[str] = Field(default=None, min_length=1, max_length=5000)
+    locked: Optional[bool] = None
+    position: Optional[int] = Field(default=None, ge=0)
 
 
 class NodeCreate(BaseModel):
@@ -134,6 +196,7 @@ class NodeCreate(BaseModel):
     x: float = 0
     y: float = 0
     chapter_id: Optional[str] = None
+    scene_id: Optional[str] = None
 
 
 class NodeUpdate(BaseModel):
@@ -145,6 +208,7 @@ class NodeUpdate(BaseModel):
     x: Optional[float] = None
     y: Optional[float] = None
     chapter_id: Optional[str] = None
+    scene_id: Optional[str] = None
 
 
 class EdgeCreate(BaseModel):
@@ -156,7 +220,7 @@ class EdgeCreate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.1.0",
+    version="0.3.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -174,7 +238,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.1.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.3.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -212,13 +276,21 @@ def get_project(project_id: str):
         chapters = connection.execute(
             "SELECT * FROM chapters WHERE project_id = ? ORDER BY position, created_at", (project_id,)
         ).fetchall()
+        scenes = connection.execute(
+            "SELECT * FROM scenes WHERE project_id = ? ORDER BY chapter_id, position, created_at", (project_id,)
+        ).fetchall()
         nodes = connection.execute("SELECT * FROM nodes WHERE project_id = ?", (project_id,)).fetchall()
         edges = connection.execute("SELECT * FROM edges WHERE project_id = ?", (project_id,)).fetchall()
+        notes = connection.execute(
+            "SELECT * FROM node_notes WHERE project_id = ? ORDER BY node_id, position, created_at", (project_id,)
+        ).fetchall()
     return {
         **dict(project),
         "chapters": [dict(row) for row in chapters],
+        "scenes": [dict(row) for row in scenes],
         "nodes": [dict(row) for row in nodes],
         "edges": [dict(row) for row in edges],
+        "notes": [{**dict(row), "locked": bool(row["locked"])} for row in notes],
     }
 
 
@@ -274,6 +346,53 @@ def delete_chapter(chapter_id: str):
     return Response(status_code=204)
 
 
+@app.post("/api/chapters/{chapter_id}/scenes", status_code=201, dependencies=[Depends(authorize)])
+def create_scene(chapter_id: str, payload: SceneCreate):
+    scene_id = new_id("scene")
+    timestamp = now()
+    with db() as connection:
+        chapter = connection.execute("SELECT project_id FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+        if not chapter:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM scenes WHERE chapter_id = ?", (chapter_id,)
+        ).fetchone()["position"]
+        connection.execute(
+            """INSERT INTO scenes(id, project_id, chapter_id, title, content, position, created_at, updated_at)
+               VALUES (?, ?, ?, ?, '', ?, ?, ?)""",
+            (scene_id, chapter["project_id"], chapter_id, payload.title, position, timestamp, timestamp),
+        )
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, chapter["project_id"]))
+        row = connection.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+    return dict(row)
+
+
+@app.patch("/api/scenes/{scene_id}", dependencies=[Depends(authorize)])
+def update_scene(scene_id: str, payload: SceneUpdate):
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段")
+    changes["updated_at"] = now()
+    with db() as connection:
+        scene = connection.execute("SELECT project_id FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        if not scene:
+            raise HTTPException(status_code=404, detail="场景不存在")
+        assignments = ", ".join(f"{column} = ?" for column in changes)
+        connection.execute(f"UPDATE scenes SET {assignments} WHERE id = ?", (*changes.values(), scene_id))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (changes["updated_at"], scene["project_id"]))
+        row = connection.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+    return dict(row)
+
+
+@app.delete("/api/scenes/{scene_id}", status_code=204, dependencies=[Depends(authorize)])
+def delete_scene(scene_id: str):
+    with db() as connection:
+        result = connection.execute("DELETE FROM scenes WHERE id = ?", (scene_id,))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="场景不存在")
+    return Response(status_code=204)
+
+
 @app.post("/api/projects/{project_id}/nodes", status_code=201, dependencies=[Depends(authorize)])
 def create_node(project_id: str, payload: NodeCreate):
     node_id = new_id("node")
@@ -289,11 +408,20 @@ def create_node(project_id: str, payload: NodeCreate):
             ).fetchone()
             if not linked:
                 raise HTTPException(status_code=400, detail="链接的章节不属于当前作品")
+        if values["scene_id"]:
+            linked_scene = connection.execute(
+                "SELECT chapter_id FROM scenes WHERE id = ? AND project_id = ?", (values["scene_id"], project_id)
+            ).fetchone()
+            if not linked_scene:
+                raise HTTPException(status_code=400, detail="链接的场景不属于当前作品")
+            if values["chapter_id"] and values["chapter_id"] != linked_scene["chapter_id"]:
+                raise HTTPException(status_code=400, detail="场景与章节不匹配")
+            values["chapter_id"] = linked_scene["chapter_id"]
         connection.execute(
-            """INSERT INTO nodes(id, project_id, label, note, node_type, shape, color, x, y, chapter_id, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO nodes(id, project_id, label, note, node_type, shape, color, x, y, chapter_id, scene_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (node_id, project_id, values["label"], values["note"], values["node_type"], values["shape"],
-             values["color"], values["x"], values["y"], values["chapter_id"], timestamp, timestamp),
+             values["color"], values["x"], values["y"], values["chapter_id"], values["scene_id"], timestamp, timestamp),
         )
         row = connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
     return dict(row)
@@ -306,7 +434,7 @@ def update_node(node_id: str, payload: NodeUpdate):
         raise HTTPException(status_code=400, detail="没有需要更新的字段")
     changes["updated_at"] = now()
     with db() as connection:
-        node = connection.execute("SELECT project_id FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        node = connection.execute("SELECT project_id, chapter_id, scene_id FROM nodes WHERE id = ?", (node_id,)).fetchone()
         if not node:
             raise HTTPException(status_code=404, detail="节点不存在")
         chapter_id = changes.get("chapter_id")
@@ -316,10 +444,60 @@ def update_node(node_id: str, payload: NodeUpdate):
             ).fetchone()
             if not linked:
                 raise HTTPException(status_code=400, detail="链接的章节不属于当前作品")
+        effective_scene_id = changes.get("scene_id", node["scene_id"])
+        if effective_scene_id:
+            linked_scene = connection.execute(
+                "SELECT chapter_id FROM scenes WHERE id = ? AND project_id = ?", (effective_scene_id, node["project_id"])
+            ).fetchone()
+            if not linked_scene:
+                raise HTTPException(status_code=400, detail="链接的场景不属于当前作品")
+            effective_chapter_id = changes.get("chapter_id", node["chapter_id"])
+            if effective_chapter_id and effective_chapter_id != linked_scene["chapter_id"]:
+                raise HTTPException(status_code=400, detail="场景与章节不匹配，请先取消场景链接")
+            changes["chapter_id"] = linked_scene["chapter_id"]
         assignments = ", ".join(f"{column} = ?" for column in changes)
         connection.execute(f"UPDATE nodes SET {assignments} WHERE id = ?", (*changes.values(), node_id))
         row = connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
     return dict(row)
+
+
+@app.post("/api/nodes/{node_id}/scene", status_code=201, dependencies=[Depends(authorize)])
+def create_scene_from_node(node_id: str, payload: NodeSceneCreate):
+    scene_id = new_id("scene")
+    timestamp = now()
+    with db() as connection:
+        node = connection.execute(
+            "SELECT id, project_id, chapter_id, scene_id, label FROM nodes WHERE id = ?", (node_id,)
+        ).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="节点不存在")
+        if node["scene_id"]:
+            raise HTTPException(status_code=409, detail="节点已经链接了场景")
+        chapter_id = payload.chapter_id or node["chapter_id"]
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="请先选择场景所属章节")
+        chapter = connection.execute(
+            "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (chapter_id, node["project_id"])
+        ).fetchone()
+        if not chapter:
+            raise HTTPException(status_code=400, detail="章节不属于当前作品")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM scenes WHERE chapter_id = ?", (chapter_id,)
+        ).fetchone()["position"]
+        title = payload.title or node["label"]
+        connection.execute(
+            """INSERT INTO scenes(id, project_id, chapter_id, title, content, position, created_at, updated_at)
+               VALUES (?, ?, ?, ?, '', ?, ?, ?)""",
+            (scene_id, node["project_id"], chapter_id, title, position, timestamp, timestamp),
+        )
+        connection.execute(
+            "UPDATE nodes SET chapter_id = ?, scene_id = ?, updated_at = ? WHERE id = ?",
+            (chapter_id, scene_id, timestamp, node_id),
+        )
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, node["project_id"]))
+        scene = connection.execute("SELECT * FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+        updated_node = connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+    return {"scene": dict(scene), "node": dict(updated_node)}
 
 
 @app.delete("/api/nodes/{node_id}", status_code=204, dependencies=[Depends(authorize)])
@@ -328,6 +506,53 @@ def delete_node(node_id: str):
         result = connection.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="节点不存在")
+    return Response(status_code=204)
+
+
+@app.post("/api/nodes/{node_id}/notes", status_code=201, dependencies=[Depends(authorize)])
+def create_node_note(node_id: str, payload: NodeNoteCreate):
+    note_id = new_id("note")
+    timestamp = now()
+    with db() as connection:
+        node = connection.execute("SELECT project_id FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        if not node:
+            raise HTTPException(status_code=404, detail="节点不存在")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM node_notes WHERE node_id = ?", (node_id,)
+        ).fetchone()["position"]
+        connection.execute(
+            """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (note_id, node["project_id"], node_id, payload.content, int(payload.locked), position, timestamp, timestamp),
+        )
+        row = connection.execute("SELECT * FROM node_notes WHERE id = ?", (note_id,)).fetchone()
+    return {**dict(row), "locked": bool(row["locked"])}
+
+
+@app.patch("/api/notes/{note_id}", dependencies=[Depends(authorize)])
+def update_node_note(note_id: str, payload: NodeNoteUpdate):
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段")
+    if "locked" in changes:
+        changes["locked"] = int(changes["locked"])
+    changes["updated_at"] = now()
+    with db() as connection:
+        note = connection.execute("SELECT id FROM node_notes WHERE id = ?", (note_id,)).fetchone()
+        if not note:
+            raise HTTPException(status_code=404, detail="便签不存在")
+        assignments = ", ".join(f"{column} = ?" for column in changes)
+        connection.execute(f"UPDATE node_notes SET {assignments} WHERE id = ?", (*changes.values(), note_id))
+        row = connection.execute("SELECT * FROM node_notes WHERE id = ?", (note_id,)).fetchone()
+    return {**dict(row), "locked": bool(row["locked"])}
+
+
+@app.delete("/api/notes/{note_id}", status_code=204, dependencies=[Depends(authorize)])
+def delete_node_note(note_id: str):
+    with db() as connection:
+        result = connection.execute("DELETE FROM node_notes WHERE id = ?", (note_id,))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="便签不存在")
     return Response(status_code=204)
 
 
