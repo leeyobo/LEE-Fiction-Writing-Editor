@@ -83,6 +83,11 @@
               <button class="node-template" draggable="true" data-type="plot" data-shape="rounded" type="button" title="圆角矩形"><i class="shape-preview rounded"></i><span>圆角</span></button>
               <button class="node-template" draggable="true" data-type="plot" data-shape="diamond" type="button" title="菱形"><i class="shape-preview diamond"></i><span>菱形</span></button>
               <button class="node-template" draggable="true" data-type="plot" data-shape="circle" type="button" title="圆形"><i class="shape-preview circle"></i><span>圆形</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="ellipse" type="button" title="椭圆"><i class="shape-preview ellipse"></i><span>椭圆</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="parallelogram" type="button" title="平行四边形"><i class="shape-preview parallelogram"></i><span>输入</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="hexagon" type="button" title="六边形"><i class="shape-preview hexagon"></i><span>六边形</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="document" type="button" title="文档"><i class="shape-preview document"></i><span>文档</span></button>
+              <button class="node-template" draggable="true" data-type="plot" data-shape="cylinder" type="button" title="数据库"><i class="shape-preview cylinder"></i><span>数据</span></button>
               <button id="connectButton" class="connect-button" type="button"><span class="arrow-preview">→</span>箭头</button>
             </div>
           </div>
@@ -91,6 +96,7 @@
               <defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>
             </svg>
             <div id="nodeLayer" class="node-layer"></div>
+            <div id="selectionRect" class="selection-rect" hidden></div>
             <div id="nodeQuickActions" class="node-quick-actions" hidden>
               <button type="button" data-node-action="note">便签</button>
               <button type="button" data-node-action="link">连接章节</button>
@@ -105,7 +111,12 @@
               <p>从上方工具箱拖入图形，用箭头连接，再为图形添加便签或章节链接。</p>
               <button id="emptyAddButton" type="button">添加第一个长方形</button>
             </div>
-            <div class="map-help">拖入图形 · 箭头连接 · 图形菜单添加便签或链接章节</div>
+            <div class="map-help">拖入图形 · 从四个端点拖出箭头 · 空白处框选 · 右键编辑或删除</div>
+            <div id="canvasContextMenu" class="canvas-context-menu" hidden>
+              <button type="button" data-context-action="edit-edge">编辑连线</button>
+              <button type="button" data-context-action="delete">删除所选</button>
+              <button type="button" data-context-action="clear">取消选择</button>
+            </div>
           </div>
         </section>
 
@@ -165,6 +176,17 @@
         <p class="modal-copy">链接后，点击图形主体即可直接进入对应章节。</p>
         <div id="chapterLinkList" class="chapter-link-list"></div>
         <button id="unlinkChapterButton" class="danger-button" type="button">断开章节链接</button>
+      </form>
+    </dialog>
+
+    <dialog id="edgeDialog" class="modal edge-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">ARROW DETAILS</p><h2>箭头设置</h2></div><button value="cancel" type="submit">×</button></div>
+        <label>箭头备注<textarea id="edgeNote" rows="5" maxlength="5000" placeholder="记录关系、转折、条件或伏笔…"></textarea></label>
+        <label>线条样式<select id="edgeStyle"><option value="solid">实线</option><option value="dashed">虚线</option><option value="dotted">点线</option></select></label>
+        <label>链接章节<select id="edgeChapter"><option value="">不链接章节</option></select></label>
+        <p class="modal-copy">保存后，点击箭头可打开其链接章节；右键箭头可以重新编辑或删除。</p>
+        <div class="modal-actions edge-actions"><button id="deleteEdgeButton" class="danger-inline" type="button">删除箭头</button><button id="openEdgeChapterButton" class="secondary-button" type="button">打开章节</button><button id="saveEdgeButton" class="primary-button" type="button">保存设置</button></div>
       </form>
     </dialog>
 

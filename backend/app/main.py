@@ -94,6 +94,10 @@ def init_db() -> None:
                 source_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
                 target_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
                 label TEXT NOT NULL DEFAULT '',
+                chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL,
+                line_style TEXT NOT NULL DEFAULT 'solid',
+                source_port TEXT NOT NULL DEFAULT 'right',
+                target_port TEXT NOT NULL DEFAULT 'left',
                 created_at TEXT NOT NULL,
                 UNIQUE(project_id, source_id, target_id)
             );
@@ -120,6 +124,16 @@ def init_db() -> None:
         if "scene_id" not in node_columns:
             connection.execute("ALTER TABLE nodes ADD COLUMN scene_id TEXT REFERENCES scenes(id) ON DELETE SET NULL")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_nodes_scene ON nodes(scene_id)")
+        edge_columns = {row["name"] for row in connection.execute("PRAGMA table_info(edges)").fetchall()}
+        edge_migrations = {
+            "chapter_id": "ALTER TABLE edges ADD COLUMN chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL",
+            "line_style": "ALTER TABLE edges ADD COLUMN line_style TEXT NOT NULL DEFAULT 'solid'",
+            "source_port": "ALTER TABLE edges ADD COLUMN source_port TEXT NOT NULL DEFAULT 'right'",
+            "target_port": "ALTER TABLE edges ADD COLUMN target_port TEXT NOT NULL DEFAULT 'left'",
+        }
+        for column, statement in edge_migrations.items():
+            if column not in edge_columns:
+                connection.execute(statement)
         connection.execute(
             """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
                SELECT 'note_' || lower(hex(randomblob(16))), n.project_id, n.id, n.note, 0, 0, n.updated_at, n.updated_at
@@ -173,7 +187,10 @@ class NodeSceneCreate(BaseModel):
 
 
 NodeType = Literal["plot", "character", "place", "conflict", "note"]
-NodeShape = Literal["rounded", "rectangle", "diamond", "circle", "pill", "note"]
+NodeShape = Literal[
+    "rounded", "rectangle", "diamond", "circle", "pill", "note",
+    "ellipse", "parallelogram", "hexagon", "document", "cylinder",
+]
 
 
 class NodeNoteCreate(BaseModel):
@@ -214,13 +231,23 @@ class NodeUpdate(BaseModel):
 class EdgeCreate(BaseModel):
     source_id: str
     target_id: str
-    label: str = Field(default="", max_length=80)
+    label: str = Field(default="", max_length=5000)
+    chapter_id: Optional[str] = None
+    line_style: Literal["solid", "dashed", "dotted"] = "solid"
+    source_port: Literal["top", "right", "bottom", "left"] = "right"
+    target_port: Literal["top", "right", "bottom", "left"] = "left"
+
+
+class EdgeUpdate(BaseModel):
+    label: Optional[str] = Field(default=None, max_length=5000)
+    chapter_id: Optional[str] = None
+    line_style: Optional[Literal["solid", "dashed", "dotted"]] = None
 
 
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.3.0",
+    version="0.4.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -238,7 +265,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.3.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.4.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -569,13 +596,47 @@ def create_edge(project_id: str, payload: EdgeCreate):
         ).fetchone()["count"]
         if node_count != 2:
             raise HTTPException(status_code=400, detail="连线节点不属于当前作品")
+        if payload.chapter_id:
+            chapter = connection.execute(
+                "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (payload.chapter_id, project_id)
+            ).fetchone()
+            if not chapter:
+                raise HTTPException(status_code=400, detail="连线链接的章节不属于当前作品")
         try:
             connection.execute(
-                "INSERT INTO edges(id, project_id, source_id, target_id, label, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (edge_id, project_id, payload.source_id, payload.target_id, payload.label, timestamp),
+                """INSERT INTO edges(
+                       id, project_id, source_id, target_id, label, chapter_id,
+                       line_style, source_port, target_port, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    edge_id, project_id, payload.source_id, payload.target_id, payload.label,
+                    payload.chapter_id, payload.line_style, payload.source_port, payload.target_port, timestamp,
+                ),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="这两个节点已经连接")
+        row = connection.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()
+    return dict(row)
+
+
+@app.patch("/api/edges/{edge_id}", dependencies=[Depends(authorize)])
+def update_edge(edge_id: str, payload: EdgeUpdate):
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段")
+    with db() as connection:
+        edge = connection.execute("SELECT project_id FROM edges WHERE id = ?", (edge_id,)).fetchone()
+        if not edge:
+            raise HTTPException(status_code=404, detail="连线不存在")
+        chapter_id = changes.get("chapter_id")
+        if chapter_id:
+            chapter = connection.execute(
+                "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (chapter_id, edge["project_id"])
+            ).fetchone()
+            if not chapter:
+                raise HTTPException(status_code=400, detail="连线链接的章节不属于当前作品")
+        assignments = ", ".join(f"{column} = ?" for column in changes)
+        connection.execute(f"UPDATE edges SET {assignments} WHERE id = ?", (*changes.values(), edge_id))
         row = connection.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()
     return dict(row)
 

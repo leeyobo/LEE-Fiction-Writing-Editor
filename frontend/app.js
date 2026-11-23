@@ -11,9 +11,14 @@ const state = {
   activeChapterId: localStorage.getItem("motu.activeChapterId") || null,
   activeSceneId: localStorage.getItem("motu.activeSceneId") || null,
   selectedNodeId: null,
+  selectedNodeIds: new Set(),
+  selectedEdgeId: null,
   editingNoteId: null,
   linkTargetNodeId: null,
   connectSourceId: null,
+  portDrag: null,
+  selectionDrag: null,
+  ignoreCanvasClick: false,
   chapterTimer: null,
   nodeTimer: null,
   toastTimer: null,
@@ -130,6 +135,8 @@ async function loadProject(projectId) {
     localStorage.removeItem("motu.activeSceneId");
   }
   state.selectedNodeId = null;
+  state.selectedNodeIds.clear();
+  state.selectedEdgeId = null;
   state.connectSourceId = null;
   renderAll();
   switchView("map");
@@ -214,7 +221,12 @@ function renderMap() {
   $("#nodeLayer").innerHTML = state.project.nodes.map(node => {
     const notes = state.project.notes.filter(note => note.node_id === node.id);
     const noteCards = notes.map(note => `<div class="node-note-card ${note.locked ? "locked" : ""}" data-note-id="${note.id}" title="点击编辑便签">${escapeHtml(note.content)}</div>`).join("");
-    return `<article class="story-node shape-${node.shape} ${node.id === state.selectedNodeId ? "selected" : ""}" data-node-id="${node.id}" data-color="${node.color}" style="left:${node.x}px;top:${node.y}px" tabindex="0">
+    const selected = node.id === state.selectedNodeId || state.selectedNodeIds.has(node.id);
+    return `<article class="story-node shape-${node.shape} ${selected ? "selected" : ""}" data-node-id="${node.id}" data-color="${node.color}" style="left:${node.x}px;top:${node.y}px" tabindex="0">
+    <button class="node-port port-top" data-port="top" type="button" title="从上方连接"></button>
+    <button class="node-port port-right" data-port="right" type="button" title="从右侧连接"></button>
+    <button class="node-port port-bottom" data-port="bottom" type="button" title="从下方连接"></button>
+    <button class="node-port port-left" data-port="left" type="button" title="从左侧连接"></button>
     <button class="node-menu-button" type="button" title="节点操作">•••</button>
     ${notes.length ? `<div class="node-notes-popover has-notes ${notes.some(note => note.locked) ? "has-locked" : ""}">${noteCards}</div>` : ""}
     <div class="node-inner"><span class="node-type">${nodeTypeNames[node.node_type] || "节点"}</span>
@@ -234,15 +246,43 @@ function renderEdges() {
   const positions = new Map();
   $$(".story-node").forEach(element => {
     const rect = element.getBoundingClientRect();
-    positions.set(element.dataset.nodeId, { x: rect.left - viewport.left + rect.width / 2, y: rect.top - viewport.top + rect.height / 2 });
+    positions.set(element.dataset.nodeId, {
+      top: { x: rect.left - viewport.left + rect.width / 2, y: rect.top - viewport.top },
+      right: { x: rect.right - viewport.left, y: rect.top - viewport.top + rect.height / 2 },
+      bottom: { x: rect.left - viewport.left + rect.width / 2, y: rect.bottom - viewport.top },
+      left: { x: rect.left - viewport.left, y: rect.top - viewport.top + rect.height / 2 },
+    });
   });
   $("#edgeLayer").setAttribute("viewBox", `0 0 ${Math.max(1, viewport.width)} ${Math.max(1, viewport.height)}`);
-  $("#edgeLayer").innerHTML = `<defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>` + state.project.edges.map(edge => {
-    const source = positions.get(edge.source_id); const target = positions.get(edge.target_id);
+  const paths = state.project.edges.map(edge => {
+    const source = positions.get(edge.source_id)?.[edge.source_port || "right"];
+    const target = positions.get(edge.target_id)?.[edge.target_port || "left"];
     if (!source || !target) return "";
-    const curve = Math.max(55, Math.abs(target.x - source.x) * .42);
-    return `<path data-edge-id="${edge.id}" d="M ${source.x} ${source.y} C ${source.x + curve} ${source.y}, ${target.x - curve} ${target.y}, ${target.x} ${target.y}" />`;
+    const path = connectorPath(source, target, edge.source_port || "right", edge.target_port || "left");
+    const middle = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 - 7 };
+    const style = edge.line_style || "solid";
+    const selected = edge.id === state.selectedEdgeId ? " selected" : "";
+    const label = edge.label?.trim() ? `<text class="edge-label" x="${middle.x}" y="${middle.y}" text-anchor="middle">${escapeHtml(edge.label.trim().split(/\r?\n/)[0].slice(0, 28))}</text>` : "";
+    return `<path class="edge-hit" data-edge-id="${edge.id}" d="${path}"/><path class="edge-line line-${style}${selected}" data-edge-id="${edge.id}" d="${path}"/>${label}`;
   }).join("");
+  let preview = "";
+  if (state.portDrag) {
+    const source = positions.get(state.portDrag.sourceId)?.[state.portDrag.sourcePort];
+    const target = state.portDrag.pointer;
+    if (source && target) preview = `<path class="edge-preview" d="${connectorPath(source, target, state.portDrag.sourcePort, "left")}"/>`;
+  }
+  $("#edgeLayer").innerHTML = `<defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>${paths}${preview}`;
+}
+
+function connectorPath(source, target, sourcePort, targetPort) {
+  const vectors = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
+  const sourceVector = vectors[sourcePort] || vectors.right;
+  const targetVector = vectors[targetPort] || vectors.left;
+  const distance = Math.hypot(target.x - source.x, target.y - source.y);
+  const bend = Math.max(48, Math.min(150, distance * .42));
+  const c1 = { x: source.x + sourceVector[0] * bend, y: source.y + sourceVector[1] * bend };
+  const c2 = { x: target.x + targetVector[0] * bend, y: target.y + targetVector[1] * bend };
+  return `M ${source.x} ${source.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${target.x} ${target.y}`;
 }
 
 function selectChapter(chapterId) {
@@ -318,10 +358,16 @@ async function addNode(type = "plot", shape = "rounded", position = null) {
   const x = position?.x ?? Math.max(24, viewport.clientWidth / 2 - 84 + (Math.random() - .5) * 100);
   const y = position?.y ?? Math.max(24, viewport.clientHeight / 2 - 50 + (Math.random() - .5) * 80);
   try {
-    const shapeNames = { rectangle: "新流程", rounded: "新节点", diamond: "新判断", circle: "新节点" };
+    const shapeNames = {
+      rectangle: "新流程", rounded: "新节点", diamond: "新判断", circle: "新节点",
+      ellipse: "开始 / 结束", parallelogram: "输入 / 输出", hexagon: "新准备",
+      document: "新文档", cylinder: "新数据",
+    };
     const node = await api(`/api/projects/${state.project.id}/nodes`, { method: "POST", body: JSON.stringify({ label: shapeNames[shape] || "新节点", node_type: type, shape, color: nodeTypeColors[type], x, y, note: "", chapter_id: null }) });
     state.project.nodes.push(node);
     state.selectedNodeId = node.id;
+    state.selectedNodeIds = new Set([node.id]);
+    state.selectedEdgeId = null;
     renderMap();
     positionQuickActions(node.id);
   } catch (error) { toast(error.message); }
@@ -342,6 +388,8 @@ function positionQuickActions(nodeId) {
 
 function selectNodeForActions(nodeId) {
   state.selectedNodeId = nodeId;
+  state.selectedNodeIds = new Set([nodeId]);
+  state.selectedEdgeId = null;
   $("#quickColorPalette").hidden = true;
   renderMap();
   requestAnimationFrame(() => positionQuickActions(nodeId));
@@ -434,6 +482,8 @@ function openInspector(nodeId) {
   const node = state.project?.nodes.find(item => item.id === nodeId);
   if (!node) return;
   state.selectedNodeId = nodeId;
+  state.selectedNodeIds = new Set([nodeId]);
+  state.selectedEdgeId = null;
   $("#nodeLabel")?.remove();
   $("#nodeType").value = node.node_type;
   $("#nodeChapter").value = node.chapter_id || "";
@@ -509,6 +559,8 @@ function openNodeLinkedContent(node) {
 function focusNodeOnMap(nodeId) {
   if (!state.project?.nodes.some(node => node.id === nodeId)) return;
   state.selectedNodeId = nodeId;
+  state.selectedNodeIds = new Set([nodeId]);
+  state.selectedEdgeId = null;
   switchView("map");
   openInspector(nodeId);
   requestAnimationFrame(() => {
@@ -519,6 +571,70 @@ function focusNodeOnMap(nodeId) {
   });
 }
 
+async function createEdgeBetween(sourceId, targetId, sourcePort = "right", targetPort = "left") {
+  if (sourceId === targetId) { toast("请选择另一个图形"); return null; }
+  try {
+    const edge = await api(`/api/projects/${state.project.id}/edges`, {
+      method: "POST",
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId, label: "", source_port: sourcePort, target_port: targetPort, line_style: "solid" }),
+    });
+    state.project.edges.push(edge);
+    state.selectedEdgeId = edge.id;
+    state.selectedNodeId = null;
+    state.selectedNodeIds.clear();
+    renderMap();
+    toast("箭头已连接；点击或右键箭头可添加备注与章节");
+    return edge;
+  } catch (error) { toast(error.message); return null; }
+}
+
+function openEdgeDialog(edgeId) {
+  const edge = state.project?.edges.find(item => item.id === edgeId);
+  if (!edge) return;
+  state.selectedEdgeId = edgeId;
+  state.selectedNodeId = null;
+  state.selectedNodeIds.clear();
+  $("#edgeNote").value = edge.label || "";
+  $("#edgeStyle").value = edge.line_style || "solid";
+  $("#edgeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map((chapter, index) => `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`).join("")}`;
+  $("#edgeChapter").value = edge.chapter_id || "";
+  $("#openEdgeChapterButton").disabled = !edge.chapter_id;
+  renderMap();
+  if (!$("#edgeDialog").open) $("#edgeDialog").showModal();
+}
+
+async function saveSelectedEdge() {
+  const edge = state.project?.edges.find(item => item.id === state.selectedEdgeId);
+  if (!edge) return;
+  const payload = { label: $("#edgeNote").value.trim(), line_style: $("#edgeStyle").value, chapter_id: $("#edgeChapter").value || null };
+  try {
+    const updated = await api(`/api/edges/${edge.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    Object.assign(edge, updated);
+    $("#edgeDialog").close();
+    renderEdges();
+    toast("箭头设置已保存");
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteSelectedEdge(confirmDelete = true) {
+  const edge = state.project?.edges.find(item => item.id === state.selectedEdgeId);
+  if (!edge) return;
+  if (confirmDelete && !confirm("删除这条箭头？")) return;
+  try {
+    await api(`/api/edges/${edge.id}`, { method: "DELETE" });
+    state.project.edges = state.project.edges.filter(item => item.id !== edge.id);
+    state.selectedEdgeId = null;
+    if ($("#edgeDialog").open) $("#edgeDialog").close();
+    renderEdges();
+    toast("箭头已删除");
+  } catch (error) { toast(error.message); }
+}
+
+function openSelectedEdgeChapter() {
+  const edge = state.project?.edges.find(item => item.id === state.selectedEdgeId);
+  if (edge?.chapter_id) { $("#edgeDialog").close(); selectChapter(edge.chapter_id); }
+}
+
 async function connectNode(targetId) {
   if (!state.connectSourceId) {
     state.connectSourceId = targetId;
@@ -526,21 +642,49 @@ async function connectNode(targetId) {
     return;
   }
   if (state.connectSourceId === targetId) { toast("请选择另一个节点"); return; }
-  try {
-    const edge = await api(`/api/projects/${state.project.id}/edges`, { method: "POST", body: JSON.stringify({ source_id: state.connectSourceId, target_id: targetId, label: "" }) });
-    state.project.edges.push(edge);
-    state.connectSourceId = null;
-    $("#connectButton").classList.remove("active");
-    $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
-    renderEdges(); toast("节点已连接");
-  } catch (error) { state.connectSourceId = null; toast(error.message); }
+  const sourceId = state.connectSourceId;
+  state.connectSourceId = null;
+  $("#connectButton").classList.remove("active");
+  $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
+  await createEdgeBetween(sourceId, targetId);
 }
 
 function bindNodeInteractions() {
   const layer = $("#nodeLayer");
   layer.addEventListener("pointerdown", event => {
+    const port = event.target.closest(".node-port");
+    if (port) {
+      event.preventDefault();
+      event.stopPropagation();
+      const element = port.closest(".story-node");
+      const viewport = $("#mapViewport").getBoundingClientRect();
+      state.portDrag = {
+        sourceId: element.dataset.nodeId,
+        sourcePort: port.dataset.port,
+        pointer: { x: event.clientX - viewport.left, y: event.clientY - viewport.top },
+      };
+      const movePort = moveEvent => {
+        state.portDrag.pointer = { x: moveEvent.clientX - viewport.left, y: moveEvent.clientY - viewport.top };
+        renderEdges();
+      };
+      const finishPort = async upEvent => {
+        window.removeEventListener("pointermove", movePort);
+        window.removeEventListener("pointerup", finishPort);
+        const targetPort = document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest(".node-port");
+        const drag = state.portDrag;
+        state.portDrag = null;
+        renderEdges();
+        if (targetPort) {
+          const targetId = targetPort.closest(".story-node")?.dataset.nodeId;
+          if (targetId) await createEdgeBetween(drag.sourceId, targetId, drag.sourcePort, targetPort.dataset.port);
+        }
+      };
+      window.addEventListener("pointermove", movePort);
+      window.addEventListener("pointerup", finishPort, { once: true });
+      return;
+    }
     const element = event.target.closest(".story-node");
-    if (!element || event.target.closest(".node-note-card, .node-menu-button") || $("#connectButton").classList.contains("active")) return;
+    if (!element || event.button !== 0 || event.target.closest(".node-note-card, .node-menu-button") || $("#connectButton").classList.contains("active")) return;
     const node = state.project.nodes.find(item => item.id === element.dataset.nodeId);
     const viewport = $("#mapViewport").getBoundingClientRect();
     const startX = event.clientX; const startY = event.clientY; const originX = node.x; const originY = node.y;
@@ -565,10 +709,82 @@ function bindNodeInteractions() {
   layer.addEventListener("click", event => {
     const element = event.target.closest(".story-node");
     if (!element) return;
+    if (event.target.closest(".node-port")) return;
     if (event.target.closest(".node-menu-button")) { selectNodeForActions(element.dataset.nodeId); return; }
     const noteCard = event.target.closest(".node-note-card");
     if (noteCard) { state.selectedNodeId = element.dataset.nodeId; openNoteDialog(noteCard.dataset.noteId); return; }
     if ($("#connectButton").classList.contains("active")) connectNode(element.dataset.nodeId);
+  });
+}
+
+function clearCanvasSelection() {
+  state.selectedNodeId = null;
+  state.selectedNodeIds.clear();
+  state.selectedEdgeId = null;
+  $("#nodeQuickActions").hidden = true;
+  $("#canvasContextMenu").hidden = true;
+  renderMap();
+}
+
+function showCanvasContextMenu(clientX, clientY) {
+  const viewport = $("#mapViewport").getBoundingClientRect();
+  const menu = $("#canvasContextMenu");
+  const hasNodes = state.selectedNodeIds.size > 0 || Boolean(state.selectedNodeId);
+  const hasEdge = Boolean(state.selectedEdgeId);
+  menu.querySelector('[data-context-action="edit-edge"]').hidden = !hasEdge;
+  menu.querySelector('[data-context-action="delete"]').hidden = !hasNodes && !hasEdge;
+  menu.hidden = false;
+  menu.style.left = `${Math.min(viewport.width - 160, Math.max(8, clientX - viewport.left))}px`;
+  menu.style.top = `${Math.min(viewport.height - 130, Math.max(8, clientY - viewport.top))}px`;
+}
+
+function bindCanvasSelection() {
+  const viewport = $("#mapViewport");
+  viewport.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.target.closest("button, .story-node, .node-quick-actions, .canvas-context-menu, .map-empty, [data-edge-id]")) return;
+    const bounds = viewport.getBoundingClientRect();
+    const start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top, clientX: event.clientX, clientY: event.clientY };
+    state.selectionDrag = { start, current: start };
+    const rectElement = $("#selectionRect");
+    rectElement.hidden = false;
+    const draw = current => {
+      const left = Math.min(start.x, current.x); const top = Math.min(start.y, current.y);
+      rectElement.style.left = `${left}px`; rectElement.style.top = `${top}px`;
+      rectElement.style.width = `${Math.abs(current.x - start.x)}px`; rectElement.style.height = `${Math.abs(current.y - start.y)}px`;
+    };
+    draw(start);
+    const move = moveEvent => {
+      const current = { x: moveEvent.clientX - bounds.left, y: moveEvent.clientY - bounds.top, clientX: moveEvent.clientX, clientY: moveEvent.clientY };
+      state.selectionDrag.current = current;
+      draw(current);
+    };
+    const finish = upEvent => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      rectElement.hidden = true;
+      const current = state.selectionDrag?.current || start;
+      state.selectionDrag = null;
+      const moved = Math.abs(current.x - start.x) + Math.abs(current.y - start.y) > 8;
+      state.ignoreCanvasClick = moved;
+      if (moved) setTimeout(() => { state.ignoreCanvasClick = false; }, 120);
+      if (!moved) return;
+      const region = {
+        left: Math.min(start.clientX, current.clientX), right: Math.max(start.clientX, current.clientX),
+        top: Math.min(start.clientY, current.clientY), bottom: Math.max(start.clientY, current.clientY),
+      };
+      const ids = $$(".story-node").filter(element => {
+        const box = element.getBoundingClientRect();
+        return box.right >= region.left && box.left <= region.right && box.bottom >= region.top && box.top <= region.bottom;
+      }).map(element => element.dataset.nodeId);
+      state.selectedNodeIds = new Set(ids);
+      state.selectedNodeId = ids.length === 1 ? ids[0] : null;
+      state.selectedEdgeId = null;
+      $("#nodeQuickActions").hidden = ids.length !== 1;
+      renderMap();
+      if (ids.length) toast(`已选中 ${ids.length} 个图形，可右键删除`);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
   });
 }
 
@@ -623,7 +839,40 @@ function bindEvents() {
     addNode(item.type, item.shape, { x: Math.max(8, event.clientX - rect.left - 80), y: Math.max(8, event.clientY - rect.top - 40) });
   });
   $("#mapViewport").addEventListener("click", event => {
-    if (event.target === $("#mapViewport") || event.target === $("#nodeLayer")) { $("#nodeQuickActions").hidden = true; state.selectedNodeId = null; renderMap(); }
+    if (state.ignoreCanvasClick) { state.ignoreCanvasClick = false; return; }
+    if (event.target === $("#mapViewport") || event.target === $("#nodeLayer") || event.target === $("#edgeLayer")) clearCanvasSelection();
+  });
+  $("#edgeLayer").addEventListener("click", event => {
+    const edgeId = event.target.closest("[data-edge-id]")?.dataset.edgeId;
+    const edge = state.project?.edges.find(item => item.id === edgeId);
+    if (!edge) return;
+    event.stopPropagation();
+    if (edge.chapter_id) selectChapter(edge.chapter_id);
+    else openEdgeDialog(edge.id);
+  });
+  $("#mapViewport").addEventListener("contextmenu", event => {
+    event.preventDefault();
+    const nodeElement = event.target.closest(".story-node");
+    const edgeId = event.target.closest("[data-edge-id]")?.dataset.edgeId;
+    if (edgeId) {
+      state.selectedEdgeId = edgeId; state.selectedNodeId = null; state.selectedNodeIds.clear(); renderMap();
+    } else if (nodeElement) {
+      const nodeId = nodeElement.dataset.nodeId;
+      if (!state.selectedNodeIds.has(nodeId)) state.selectedNodeIds = new Set([nodeId]);
+      state.selectedNodeId = state.selectedNodeIds.size === 1 ? nodeId : null;
+      state.selectedEdgeId = null; renderMap();
+    }
+    showCanvasContextMenu(event.clientX, event.clientY);
+  });
+  $("#canvasContextMenu").addEventListener("click", async event => {
+    const action = event.target.closest("[data-context-action]")?.dataset.contextAction;
+    $("#canvasContextMenu").hidden = true;
+    if (action === "edit-edge" && state.selectedEdgeId) openEdgeDialog(state.selectedEdgeId);
+    if (action === "delete") {
+      if (state.selectedEdgeId) await deleteSelectedEdge();
+      else await deleteSelectedNode();
+    }
+    if (action === "clear") clearCanvasSelection();
   });
   $("#emptyAddButton").addEventListener("click", () => addNode("plot", "rectangle"));
   $("#connectButton").addEventListener("click", event => {
@@ -652,6 +901,9 @@ function bindEvents() {
   $("#deleteNoteButton").addEventListener("click", deleteCurrentNote);
   $("#chapterLinkList").addEventListener("click", event => { const id = event.target.closest("[data-link-chapter-id]")?.dataset.linkChapterId; if (id) setNodeChapterLink(id); });
   $("#unlinkChapterButton").addEventListener("click", () => setNodeChapterLink(null));
+  $("#saveEdgeButton").addEventListener("click", saveSelectedEdge);
+  $("#deleteEdgeButton").addEventListener("click", () => deleteSelectedEdge());
+  $("#openEdgeChapterButton").addEventListener("click", openSelectedEdgeChapter);
   $("#nodeType").addEventListener("change", queueNodeSave);
   $("#nodeChapter").addEventListener("change", queueNodeSave);
   $("#createSceneButton").addEventListener("click", createSceneFromSelectedNode);
@@ -669,6 +921,12 @@ function bindEvents() {
   $("#deleteNodeButton").addEventListener("click", deleteSelectedNode);
   $(".inspector-heading button").addEventListener("click", () => $(".inspector").classList.add("hidden"));
   bindNodeInteractions();
+  bindCanvasSelection();
+  document.addEventListener("pointerdown", event => {
+    if (!event.target.closest("#canvasContextMenu")) $("#canvasContextMenu").hidden = true;
+    const inspector = $("#inspector");
+    if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
+  });
   window.addEventListener("resize", () => requestAnimationFrame(renderEdges));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));
 }
@@ -713,14 +971,20 @@ async function createProject() {
 }
 
 async function deleteSelectedNode() {
-  const node = state.project?.nodes.find(item => item.id === state.selectedNodeId); if (!node) return;
-  if (!confirm(`删除节点“${node.label}”？相关连线也会删除。`)) return;
+  const ids = state.selectedNodeIds.size ? [...state.selectedNodeIds] : (state.selectedNodeId ? [state.selectedNodeId] : []);
+  const nodes = state.project?.nodes.filter(item => ids.includes(item.id)) || [];
+  if (!nodes.length) return;
+  const message = nodes.length === 1 ? `删除节点“${nodes[0].label}”？相关连线也会删除。` : `删除选中的 ${nodes.length} 个图形？相关箭头也会一起删除。`;
+  if (!confirm(message)) return;
   try {
-    await api(`/api/nodes/${node.id}`, { method: "DELETE" });
-    state.project.nodes = state.project.nodes.filter(item => item.id !== node.id);
-    state.project.edges = state.project.edges.filter(edge => edge.source_id !== node.id && edge.target_id !== node.id);
-    state.project.notes = state.project.notes.filter(note => note.node_id !== node.id);
-    state.selectedNodeId = null; $(".inspector").classList.add("hidden"); $("#nodeQuickActions").hidden = true; renderMap(); toast("节点已删除");
+    await Promise.all(ids.map(id => api(`/api/nodes/${id}`, { method: "DELETE" })));
+    const deletedIds = new Set(ids);
+    state.project.nodes = state.project.nodes.filter(item => !deletedIds.has(item.id));
+    state.project.edges = state.project.edges.filter(edge => !deletedIds.has(edge.source_id) && !deletedIds.has(edge.target_id));
+    state.project.notes = state.project.notes.filter(note => !deletedIds.has(note.node_id));
+    state.selectedNodeId = null; state.selectedNodeIds.clear(); state.selectedEdgeId = null;
+    $(".inspector").classList.add("hidden"); $("#nodeQuickActions").hidden = true; renderMap();
+    toast(nodes.length === 1 ? "节点已删除" : `已删除 ${nodes.length} 个图形`);
   } catch (error) { toast(error.message); }
 }
 

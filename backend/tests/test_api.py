@@ -44,9 +44,19 @@ class ApiFlowTest(unittest.TestCase):
         ).json()
         edge = self.client.post(
             f"/api/projects/{project['id']}/edges",
-            json={"source_id": first["id"], "target_id": second["id"], "label": "introduces"},
+            json={
+                "source_id": first["id"], "target_id": second["id"], "label": "introduces",
+                "source_port": "bottom", "target_port": "top", "line_style": "dashed",
+            },
         )
         self.assertEqual(edge.status_code, 201)
+        self.assertEqual(edge.json()["source_port"], "bottom")
+        edge_update = self.client.patch(
+            f"/api/edges/{edge.json()['id']}",
+            json={"label": "A conditional transition", "chapter_id": chapter["id"], "line_style": "dotted"},
+        )
+        self.assertEqual(edge_update.status_code, 200)
+        self.assertEqual(edge_update.json()["line_style"], "dotted")
 
         scene_link = self.client.post(
             f"/api/nodes/{first['id']}/scene",
@@ -80,6 +90,8 @@ class ApiFlowTest(unittest.TestCase):
         final = self.client.get(f"/api/projects/{project['id']}").json()
         self.assertEqual(len(final["nodes"]), 2)
         self.assertEqual(len(final["edges"]), 1)
+        self.assertEqual(final["edges"][0]["chapter_id"], chapter["id"])
+        self.assertEqual(final["edges"][0]["label"], "A conditional transition")
         self.assertEqual(len(final["scenes"]), 1)
         self.assertEqual(len(final["notes"]), 2)
         self.assertTrue(all(note["locked"] for note in final["notes"]))
@@ -99,14 +111,23 @@ class ApiFlowTest(unittest.TestCase):
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 )"""
             )
+            connection.execute(
+                """CREATE TABLE edges (
+                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, source_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+                    UNIQUE(project_id, source_id, target_id)
+                )"""
+            )
         main.DATABASE_PATH = legacy_path
         main.init_db()
         with sqlite3.connect(str(legacy_path)) as connection:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(nodes)").fetchall()}
+            edge_columns = {row[1] for row in connection.execute("PRAGMA table_info(edges)").fetchall()}
             scene_table = connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scenes'"
             ).fetchone()
         self.assertIn("scene_id", columns)
+        self.assertTrue({"chapter_id", "line_style", "source_port", "target_port"}.issubset(edge_columns))
         self.assertIsNotNone(scene_table)
 
     def test_api_key_protects_writing_data(self):
