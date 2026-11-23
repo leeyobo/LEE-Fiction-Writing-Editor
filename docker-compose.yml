@@ -1,0 +1,16 @@
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      LEE_DATABASE_PATH: /data/lee.db
+      LEE_API_KEY: ${LEE_API_KEY:-}
+      LEE_CORS_ORIGINS: ${LEE_CORS_ORIGINS:-*}
+    volumes:
+      - lee-data:/data
+    restart: unless-stopped
+
+volumes:
+  lee-data:
+

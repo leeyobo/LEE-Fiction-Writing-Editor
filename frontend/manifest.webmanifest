@@ -1,0 +1,14 @@
+{
+  "name": "墨图 · 小说编辑器",
+  "short_name": "墨图",
+  "description": "正文与可跳转故事地图融为一体的开源小说编辑器",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#f6f7fb",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
+

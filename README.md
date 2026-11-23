@@ -1,0 +1,172 @@
+<div align="center">
+
+# 墨图 · LEE Fiction Writing Editor
+
+**让小说正文、章节规划与故事地图在同一个工作区自然连接。**
+
+一款开源、自托管、前后端分离的小说编辑器。节点可以关联章节，双击即可从故事地图跳转到正文。
+
+[功能介绍](#功能) · [快速开始](#快速开始) · [部署](#部署) · [路线图](#路线图)
+
+</div>
+
+> [!NOTE]
+> 项目目前处于 MVP 阶段，适合个人试用和自托管验证。多设备冲突合并、完整离线写作和多用户权限仍在开发路线中。
+
+## 项目愿景
+
+传统小说编辑器通常把正文放在一边，把大纲、人物关系和灵感便签放在另一边。墨图希望把它们变成可关联的数据：
+
+- 一个故事节点可以链接到具体章节；
+- 双击节点直接进入正文，不必反复翻目录；
+- 节点便签记录写作目的、伏笔、冲突或待办；
+- 调整故事结构不会破坏正文内容；
+- 作者可以掌控自己的服务器和作品数据。
+
+## 功能
+
+- **章节写作**：章节目录、字数统计、Markdown 正文编辑和自动保存。
+- **故事地图**：支持情节、人物、地点、冲突和便签节点。
+- **章节链接**：节点可关联章节，双击节点立即跳转。
+- **自由画布**：拖拽节点、调整位置、创建有向连线。
+- **前后端分离**：前端可连接任意自行部署的墨图后端。
+- **跨平台 PWA**：支持手机与 Windows 浏览器，可安装到桌面。
+- **自托管存储**：FastAPI + SQLite，提供可选 API Key 保护。
+- **开放 API**：启动后可通过 `/docs` 查看交互式接口文档。
+
+## 技术架构
+
+```text
+手机 / Windows / 浏览器（静态 PWA）
+                 │
+                 │ HTTPS + JSON API
+                 ▼
+          FastAPI 自托管服务
+                 │
+                 ▼
+           SQLite 数据文件
+```
+
+核心数据被拆分为作品、章节、节点和连线，而不是把思维导图保存成一张无法查询的图片。详细设计见 [架构说明](docs/architecture.md)。
+
+| 模块 | 技术 | 说明 |
+| --- | --- | --- |
+| 前端 | HTML、CSS、JavaScript、PWA | 无构建依赖，可部署到任意静态托管 |
+| 后端 | Python、FastAPI | 提供 REST API 与自动生成的 OpenAPI 文档 |
+| 存储 | SQLite | 适合个人自托管，数据保存在单个文件中 |
+| 部署 | Docker Compose | 一条命令启动后端服务 |
+
+## 快速开始
+
+### 环境要求
+
+- Python 3.8 或更高版本
+- 现代浏览器
+- Docker（可选）
+
+### 启动后端
+
+```powershell
+cd backend
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 启动前端
+
+另开一个终端，在项目根目录执行：
+
+```powershell
+python -m http.server 5173 --directory frontend
+```
+
+浏览器访问 `http://localhost:5173`。默认后端地址为 `http://localhost:8000`，也可以在界面的“服务器设置”中改成远程服务器。
+
+后端接口文档：`http://localhost:8000/docs`
+
+## 部署
+
+### 使用 Docker 部署后端
+
+```powershell
+docker compose up -d --build
+```
+
+作品数据默认写入名为 `lee-data` 的 Docker volume。
+
+公网部署前建议配置 API Key 和明确的前端来源：
+
+```powershell
+$env:LEE_API_KEY="替换为足够长的随机字符串"
+$env:LEE_CORS_ORIGINS="https://writer.example.com"
+docker compose up -d --build
+```
+
+前端目录是纯静态文件，可以部署到 GitHub Pages、Cloudflare Pages、Nginx 或其他静态托管服务。公网环境中，前端与后端都应使用 HTTPS。
+
+### 环境变量
+
+| 名称 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LEE_DATABASE_PATH` | `./data/lee.db` | SQLite 数据库位置 |
+| `LEE_API_KEY` | 空 | 设置后要求 `Authorization: Bearer <key>` |
+| `LEE_CORS_ORIGINS` | `*` | 允许访问 API 的前端来源，多个值用逗号分隔 |
+
+## 项目结构
+
+```text
+LEE-Fiction-Writing-Editor/
+├─ backend/
+│  ├─ app/main.py          # FastAPI 与 SQLite 数据层
+│  ├─ tests/test_api.py    # API 集成测试
+│  └─ Dockerfile
+├─ frontend/
+│  ├─ index.html           # 编辑器界面
+│  ├─ app.js               # 章节、画布与同步交互
+│  ├─ styles.css           # 响应式视觉样式
+│  └─ sw.js                # PWA 缓存
+├─ docs/architecture.md
+└─ docker-compose.yml
+```
+
+## 测试
+
+```powershell
+$env:PYTHONPATH="backend"
+python backend/tests/test_api.py
+node --check frontend/app.js
+```
+
+测试覆盖作品创建、章节保存、节点和章节关联、节点连线以及 API Key 鉴权。
+
+## 当前限制
+
+- 多台设备同时编辑时采用最后写入覆盖，尚未提供冲突合并界面。
+- API Key 面向个人服务器，不等同于完整的多用户账户系统。
+- Service Worker 当前缓存应用外壳，不缓存未同步的正文修改。
+- SQLite 适合个人使用；多人实时协作需要进一步支持 PostgreSQL 和协作协议。
+
+## 路线图
+
+- [ ] ZIP、Markdown 导入与导出
+- [ ] 自动快照、历史版本和备份恢复
+- [ ] 离线写作队列与多设备冲突合并
+- [ ] 人物卡、世界观资料库和时间线视图
+- [ ] Tauri Windows 桌面安装包
+- [ ] 用户账户、项目权限和 PostgreSQL
+- [ ] 多人协作与评论
+
+## 参与贡献
+
+欢迎提交 Issue、功能建议和 Pull Request。开始开发前建议先阅读 [架构说明](docs/architecture.md)，并尽量让提交只解决一个清晰问题。
+
+提交前请运行后端测试与前端语法检查。涉及数据结构的修改应同时说明迁移与向后兼容方案。
+
+## 安全说明
+
+如果发现安全问题，请不要在公开 Issue 中包含 API Key、服务器地址、作品内容或其他敏感数据。正式公开安全报告渠道将在项目建立维护邮箱后补充。
+
+## 开源协议
+
+本项目使用 [MIT License](LICENSE)。你可以自由使用、修改和分发，但需保留原始版权与许可声明。
+

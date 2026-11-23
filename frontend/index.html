@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f7fb" />
+    <meta name="description" content="墨图：把小说正文与可跳转故事地图放在一起的开源写作工具。" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>墨图 · 小说编辑器</title>
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="墨图小说编辑器">
+          <span class="brand-mark">墨</span>
+          <div><strong>墨图</strong><small>小说工作台</small></div>
+        </div>
+        <div class="project-heading">
+          <button id="projectPicker" class="project-picker" type="button">
+            <span id="projectTitle">正在连接…</span><span class="chevron">⌄</span>
+          </button>
+          <span id="saveState" class="save-state"><i></i>等待连接</span>
+        </div>
+        <nav class="view-switch" aria-label="工作区视图">
+          <button class="view-button active" data-view="write" type="button">写作</button>
+          <button class="view-button" data-view="map" type="button">故事地图</button>
+        </nav>
+        <div class="top-actions">
+          <button id="focusButton" class="icon-button" type="button" title="专注模式">◐</button>
+          <button id="settingsButton" class="primary-quiet" type="button">服务器设置</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="chapter-panel">
+          <div class="panel-title-row">
+            <div><p class="eyebrow">MANUSCRIPT</p><h2>作品目录</h2></div>
+            <button id="addChapterButton" class="add-button" type="button" title="新建章节">＋</button>
+          </div>
+          <label class="search-box"><span>⌕</span><input id="chapterSearch" type="search" placeholder="搜索章节" /></label>
+          <div class="volume-label"><span>第一卷</span><small id="chapterCount">0 章</small></div>
+          <ol id="chapterList" class="chapter-list"></ol>
+          <div class="sidebar-footer">
+            <div class="progress-ring"><span id="totalWords">0</span></div>
+            <div><strong>全书字数</strong><small>所有章节合计</small></div>
+          </div>
+        </aside>
+
+        <section id="writeView" class="write-view view-panel active">
+          <div class="editor-toolbar">
+            <div class="format-tools" aria-label="文本工具">
+              <button type="button" data-insert="**粗体**"><b>B</b></button>
+              <button type="button" data-insert="*斜体*"><i>I</i></button>
+              <span></span>
+              <button type="button" data-prefix="# ">H1</button>
+              <button type="button" data-prefix="> ">引用</button>
+              <button type="button" data-prefix="- ">列表</button>
+            </div>
+            <div class="editor-meta"><span id="chapterWords">0 字</span><span>Markdown</span></div>
+          </div>
+          <article class="paper">
+            <div class="paper-heading">
+              <span id="chapterIndex" class="chapter-index">CHAPTER 01</span>
+              <input id="chapterTitleInput" class="chapter-title-input" value="" aria-label="章节标题" />
+              <p id="chapterSubtitle">在安静里，把故事写下来。</p>
+            </div>
+            <textarea id="chapterContent" class="manuscript" spellcheck="false" placeholder="从这里开始写作…"></textarea>
+          </article>
+        </section>
+
+        <section id="mapView" class="map-view view-panel">
+          <div class="map-toolbar">
+            <div>
+              <p class="eyebrow">STORY MAP</p>
+              <h2>故事地图</h2>
+            </div>
+            <div class="map-actions">
+              <button class="node-template" data-type="plot" data-shape="rounded" type="button"><i class="dot blue"></i>情节</button>
+              <button class="node-template" data-type="character" data-shape="pill" type="button"><i class="dot violet"></i>人物</button>
+              <button class="node-template" data-type="place" data-shape="rectangle" type="button"><i class="dot green"></i>地点</button>
+              <button class="node-template" data-type="conflict" data-shape="diamond" type="button"><i class="dot rose"></i>冲突</button>
+              <button class="node-template" data-type="note" data-shape="note" type="button"><i class="dot amber"></i>便签</button>
+              <button id="connectButton" class="connect-button" type="button">连接节点</button>
+            </div>
+          </div>
+          <div id="mapViewport" class="map-viewport">
+            <svg id="edgeLayer" class="edge-layer" aria-hidden="true">
+              <defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>
+            </svg>
+            <div id="nodeLayer" class="node-layer"></div>
+            <div id="mapEmpty" class="map-empty">
+              <div class="empty-glyph">✦</div><h3>让故事在这里展开</h3>
+              <p>添加情节、人物或便签节点，再把它们链接到章节。</p>
+              <button id="emptyAddButton" type="button">添加第一个情节点</button>
+            </div>
+            <div class="map-help">双击已链接节点跳转章节 · 拖动节点调整布局</div>
+          </div>
+        </section>
+
+        <aside id="inspector" class="inspector hidden">
+          <div class="inspector-heading"><div><p class="eyebrow">INSPECTOR</p><h2>节点详情</h2></div><button id="closeInspector" type="button">×</button></div>
+          <label>节点名称<input id="nodeLabel" maxlength="120" /></label>
+          <label>类型<select id="nodeType"><option value="plot">情节</option><option value="character">人物</option><option value="place">地点</option><option value="conflict">冲突</option><option value="note">便签</option></select></label>
+          <label>链接章节<select id="nodeChapter"><option value="">不链接章节</option></select></label>
+          <label>便签<textarea id="nodeNote" rows="8" maxlength="5000" placeholder="记录这一段的目的、冲突、伏笔或待办…"></textarea></label>
+          <div class="color-picker" aria-label="节点颜色"><button data-color="blue"></button><button data-color="violet"></button><button data-color="green"></button><button data-color="amber"></button><button data-color="rose"></button><button data-color="slate"></button></div>
+          <button id="jumpChapterButton" class="wide-button" type="button">打开链接章节</button>
+          <button id="deleteNodeButton" class="danger-button" type="button">删除节点</button>
+        </aside>
+      </main>
+
+      <nav class="mobile-nav" aria-label="移动端导航">
+        <button data-mobile="chapters" type="button">目录</button><button class="active" data-mobile="write" type="button">写作</button><button data-mobile="map" type="button">地图</button><button data-mobile="settings" type="button">设置</button>
+      </nav>
+    </div>
+
+    <dialog id="settingsDialog" class="modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">SELF-HOSTED</p><h2>连接你的写作服务器</h2></div><button value="cancel" type="submit">×</button></div>
+        <p class="modal-copy">服务器只保存你的作品数据。地址和密钥仅存储在这台设备的浏览器中。</p>
+        <label>服务器地址<input id="serverUrl" type="url" placeholder="https://fiction.example.com" required /></label>
+        <label>API Key（可选）<input id="apiKey" type="password" autocomplete="off" placeholder="后端未设置时留空" /></label>
+        <div id="connectionResult" class="connection-result"></div>
+        <div class="modal-actions"><button id="testConnection" class="secondary-button" type="button">测试连接</button><button id="saveSettings" class="primary-button" type="button">保存并连接</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="projectDialog" class="modal project-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">LIBRARY</p><h2>我的作品</h2></div><button value="cancel" type="submit">×</button></div>
+        <div id="projectList" class="project-list"></div>
+        <div class="new-project-row"><input id="newProjectTitle" placeholder="新作品名称" maxlength="100" /><button id="createProjectButton" type="button">新建作品</button></div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>
+
