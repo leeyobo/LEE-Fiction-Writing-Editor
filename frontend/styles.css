@@ -166,7 +166,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .story-node.shape-cylinder::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 30px; border: 1px solid color-mix(in srgb, var(--node-color) 60%, white); border-radius: 50%; background: color-mix(in srgb, var(--node-color) 5%, white); }
 .story-node.shape-diamond { width: 132px; height: 132px; min-height: 132px; padding: 0; display: grid; place-items: center; transform: rotate(45deg); border-radius: 10px; }
 .story-node.shape-diamond .node-inner { width: 100px; text-align: center; transform: rotate(-45deg); }
-.story-node.shape-diamond .node-menu-button { transform: rotate(-45deg); }
+.story-node.shape-diamond .node-menu-button { top: -18px; right: 50%; margin-right: -13px; transform: rotate(-45deg); }
 .story-node.shape-diamond .node-notes-popover { transform: translateX(-50%) rotate(-45deg); transform-origin: center bottom; }
 .node-inner { position: relative; z-index: 1; }
 .node-port { position: absolute; z-index: 12; width: 13px; height: 13px; padding: 0; border: 2px solid white; border-radius: 50%; background: var(--node-color); box-shadow: 0 0 0 1px var(--node-color), 0 2px 6px rgba(20,50,95,.25); cursor: crosshair; opacity: 0; transition: opacity .12s ease, transform .12s ease; }
@@ -180,6 +180,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .node-port.port-top-right { left: 75%; top: -7px; margin-left: -6px; }
 .node-port.port-bottom-right { left: 75%; bottom: -7px; margin-left: -6px; }
 .node-port.port-bottom-left { left: 25%; bottom: -7px; margin-left: -6px; }
+.story-node.shape-diamond .node-port.port-top { left: -7px; top: -7px; margin: 0; }
+.story-node.shape-diamond .node-port.port-right { right: -7px; top: -7px; margin: 0; }
+.story-node.shape-diamond .node-port.port-bottom { right: -7px; bottom: -7px; left: auto; margin: 0; }
+.story-node.shape-diamond .node-port.port-left { left: -7px; bottom: -7px; top: auto; margin: 0; }
 .node-type { display: block; margin-bottom: 6px; color: var(--node-color); font-size: 9px; font-weight: 700; letter-spacing: .12em; }
 .node-label { display: block; font-family: "Noto Serif SC", serif; font-size: 15px; font-weight: 700; line-height: 1.45; }
 .node-link { display: flex; align-items: center; gap: 4px; margin-top: 8px; color: #70758a; font-size: 10px; }
