@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v8-diamond-ports";
+const CACHE = "motu-shell-v9-edge-selection";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
