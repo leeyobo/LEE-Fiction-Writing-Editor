@@ -161,6 +161,9 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .story-node.shape-hexagon { width: 168px; height: 146px; min-height: 146px; display: grid; place-items: center; padding: 22px 30px; text-align: center; }
 .story-node.shape-hexagon::before { border: 0; clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background: color-mix(in srgb, var(--node-color) 62%, white); }
 .story-node.shape-hexagon::after { content: ""; position: absolute; inset: 1.5px; z-index: 0; clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); background: color-mix(in srgb, var(--node-color) 9%, white); }
+.story-node.shape-hexagon.selected { outline: 0; }
+.story-node.shape-hexagon.selected::before { background: var(--node-color); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--node-color) 34%, transparent)); }
+.story-node.shape-hexagon.selected::after { inset: 3px; }
 .story-node.shape-document { border-radius: 5px 5px 35% 10px; }
 .story-node.shape-cylinder { min-height: 96px; padding-top: 22px; border-radius: 50% / 18%; }
 .story-node.shape-cylinder::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 30px; border: 1px solid color-mix(in srgb, var(--node-color) 60%, white); border-radius: 50%; background: color-mix(in srgb, var(--node-color) 5%, white); }
