@@ -19,6 +19,12 @@ const state = {
   connectSourceId: null,
   portDrag: null,
   selectionDrag: null,
+  camera: { x: 0, y: 0 },
+  canvasAnchor: null,
+  canvasBounds: null,
+  canvasInitialized: false,
+  panMode: false,
+  spacePressed: false,
   ignoreCanvasClick: false,
   chapterTimer: null,
   nodeTimer: null,
@@ -140,6 +146,10 @@ async function loadProject(projectId) {
   state.selectedEdgeId = null;
   state.selectedEdgeIds.clear();
   state.connectSourceId = null;
+  state.camera = { x: 0, y: 0 };
+  state.canvasAnchor = null;
+  state.canvasBounds = null;
+  state.canvasInitialized = false;
   renderAll();
   switchView("map");
   setSaveState("已同步", "saved");
@@ -230,8 +240,129 @@ function nodePortMarkup(shape) {
   return ports.map(([port, label]) => `<button class="node-port port-${port.replaceAll("_", "-")}" data-port="${port}" type="button" title="从${label}连接"></button>`).join("");
 }
 
+const MAX_CANVAS_RADIUS = 10000;
+const CANVAS_GROWTH_MARGIN = 260;
+
+function nodeWorldSize(node) {
+  if (node.shape === "circle") return { width: 124, height: 124 };
+  if (node.shape === "diamond") return { width: 188, height: 188 };
+  if (node.shape === "hexagon") return { width: 168, height: 146 };
+  if (["ellipse", "cylinder"].includes(node.shape)) return { width: 168, height: 100 };
+  return { width: 168, height: 86 };
+}
+
+function ensureCanvasState() {
+  if (state.canvasInitialized || !state.project) return;
+  const viewport = $("#mapViewport").getBoundingClientRect();
+  if (!viewport.width || !viewport.height) return;
+  state.canvasAnchor = { x: viewport.width / 2, y: viewport.height / 2 };
+  state.canvasBounds = { minX: 0, minY: 0, maxX: viewport.width, maxY: viewport.height };
+  state.canvasInitialized = true;
+  expandCanvasBoundsForNodes();
+}
+
+function expandCanvasBoundsForNodes() {
+  if (!state.canvasBounds || !state.project) return;
+  const limit = state.canvasAnchor || { x: 0, y: 0 };
+  state.project.nodes.forEach(node => {
+    const size = nodeWorldSize(node);
+    state.canvasBounds.minX = Math.max(limit.x - MAX_CANVAS_RADIUS, Math.min(state.canvasBounds.minX, node.x - CANVAS_GROWTH_MARGIN));
+    state.canvasBounds.minY = Math.max(limit.y - MAX_CANVAS_RADIUS, Math.min(state.canvasBounds.minY, node.y - CANVAS_GROWTH_MARGIN));
+    state.canvasBounds.maxX = Math.min(limit.x + MAX_CANVAS_RADIUS, Math.max(state.canvasBounds.maxX, node.x + size.width + CANVAS_GROWTH_MARGIN));
+    state.canvasBounds.maxY = Math.min(limit.y + MAX_CANVAS_RADIUS, Math.max(state.canvasBounds.maxY, node.y + size.height + CANVAS_GROWTH_MARGIN));
+  });
+}
+
+function expandCanvasBoundsToVisible() {
+  if (!state.canvasBounds || !state.canvasAnchor) return;
+  const viewport = $("#mapViewport");
+  const visible = { left: -state.camera.x, top: -state.camera.y, right: viewport.clientWidth - state.camera.x, bottom: viewport.clientHeight - state.camera.y };
+  if (visible.left < state.canvasBounds.minX) state.canvasBounds.minX = Math.max(state.canvasAnchor.x - MAX_CANVAS_RADIUS, visible.left - CANVAS_GROWTH_MARGIN);
+  if (visible.top < state.canvasBounds.minY) state.canvasBounds.minY = Math.max(state.canvasAnchor.y - MAX_CANVAS_RADIUS, visible.top - CANVAS_GROWTH_MARGIN);
+  if (visible.right > state.canvasBounds.maxX) state.canvasBounds.maxX = Math.min(state.canvasAnchor.x + MAX_CANVAS_RADIUS, visible.right + CANVAS_GROWTH_MARGIN);
+  if (visible.bottom > state.canvasBounds.maxY) state.canvasBounds.maxY = Math.min(state.canvasAnchor.y + MAX_CANVAS_RADIUS, visible.bottom + CANVAS_GROWTH_MARGIN);
+}
+
+function clampCamera() {
+  if (!state.canvasAnchor) return;
+  const viewport = $("#mapViewport");
+  const minWorldX = state.canvasAnchor.x - MAX_CANVAS_RADIUS; const maxWorldX = state.canvasAnchor.x + MAX_CANVAS_RADIUS;
+  const minWorldY = state.canvasAnchor.y - MAX_CANVAS_RADIUS; const maxWorldY = state.canvasAnchor.y + MAX_CANVAS_RADIUS;
+  state.camera.x = Math.max(viewport.clientWidth - maxWorldX, Math.min(-minWorldX, state.camera.x));
+  state.camera.y = Math.max(viewport.clientHeight - maxWorldY, Math.min(-minWorldY, state.camera.y));
+}
+
+function applyCamera() {
+  ensureCanvasState();
+  if (!state.canvasInitialized) return;
+  const viewport = $("#mapViewport");
+  if (!viewport.clientWidth || !viewport.clientHeight) return;
+  clampCamera();
+  expandCanvasBoundsToVisible();
+  $("#nodeLayer").style.transform = `translate(${state.camera.x}px, ${state.camera.y}px)`;
+  $("#mapViewport").style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
+  if (state.selectedNodeId) positionQuickActions(state.selectedNodeId);
+  renderEdges();
+  renderMinimap();
+}
+
+function panCanvasBy(dx, dy) {
+  ensureCanvasState();
+  state.camera.x += dx; state.camera.y += dy;
+  applyCamera();
+}
+
+function centerCanvasOnAnchor() {
+  ensureCanvasState();
+  const viewport = $("#mapViewport");
+  state.camera.x = viewport.clientWidth / 2 - state.canvasAnchor.x;
+  state.camera.y = viewport.clientHeight / 2 - state.canvasAnchor.y;
+  applyCamera();
+  toast("已回到流程图开始中心");
+}
+
+function centerCanvasOnWorldPoint(x, y) {
+  ensureCanvasState();
+  const viewport = $("#mapViewport");
+  state.camera.x = viewport.clientWidth / 2 - x;
+  state.camera.y = viewport.clientHeight / 2 - y;
+  applyCamera();
+}
+
+function renderMinimap() {
+  if (!state.canvasInitialized || !state.canvasBounds || !state.project) return;
+  const viewport = $("#mapViewport"); const panel = $("#minimapPanel"); const svg = $("#minimapSvg");
+  const bounds = state.canvasBounds;
+  const width = Math.max(1, bounds.maxX - bounds.minX); const height = Math.max(1, bounds.maxY - bounds.minY);
+  const shouldShow = state.project.nodes.length >= 5 || width > viewport.clientWidth * 1.15 || height > viewport.clientHeight * 1.15 || Math.abs(state.camera.x) + Math.abs(state.camera.y) > 20;
+  panel.classList.toggle("hidden", !shouldShow);
+  if (!shouldShow) return;
+  const placedLeft = parseFloat(panel.style.left); const placedTop = parseFloat(panel.style.top);
+  if (Number.isFinite(placedLeft) && Number.isFinite(placedTop)) {
+    panel.style.left = `${Math.max(8, Math.min(viewport.clientWidth - panel.offsetWidth - 8, placedLeft))}px`;
+    panel.style.top = `${Math.max(8, Math.min(viewport.clientHeight - panel.offsetHeight - 8, placedTop))}px`;
+  }
+  svg.setAttribute("viewBox", `${bounds.minX} ${bounds.minY} ${width} ${height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  const nodeMap = new Map(state.project.nodes.map(node => [node.id, node]));
+  const colors = { blue: "#60a5fa", violet: "#8b5cf6", green: "#34d399", amber: "#f59e0b", rose: "#fb7185", slate: "#94a3b8" };
+  const edges = state.project.edges.map(edge => {
+    const source = nodeMap.get(edge.source_id); const target = nodeMap.get(edge.target_id);
+    if (!source || !target) return "";
+    const sourceSize = nodeWorldSize(source); const targetSize = nodeWorldSize(target);
+    return `<line x1="${source.x + sourceSize.width / 2}" y1="${source.y + sourceSize.height / 2}" x2="${target.x + targetSize.width / 2}" y2="${target.y + targetSize.height / 2}" stroke="${colors[edge.color] || colors.blue}"/>`;
+  }).join("");
+  const nodes = state.project.nodes.map(node => {
+    const size = nodeWorldSize(node);
+    return `<rect x="${node.x}" y="${node.y}" width="${size.width}" height="${size.height}" rx="12" fill="${colors[node.color] || colors.blue}"/>`;
+  }).join("");
+  const visibleX = -state.camera.x; const visibleY = -state.camera.y;
+  svg.innerHTML = `<g class="minimap-edges">${edges}</g><g class="minimap-nodes">${nodes}</g><circle class="minimap-anchor" cx="${state.canvasAnchor.x}" cy="${state.canvasAnchor.y}" r="10"/><rect id="minimapViewportRect" class="minimap-viewport-rect" x="${visibleX}" y="${visibleY}" width="${viewport.clientWidth}" height="${viewport.clientHeight}"/>`;
+}
+
 function renderMap() {
   if (!state.project) return;
+  ensureCanvasState();
   const chapterMap = new Map(state.project.chapters.map(chapter => [chapter.id, chapter.title]));
   const sceneMap = new Map(state.project.scenes.map(scene => [scene.id, scene.title]));
   $("#nodeLayer").innerHTML = state.project.nodes.map(node => {
@@ -249,8 +380,7 @@ function renderMap() {
   </article>`;
   }).join("");
   $("#mapEmpty").classList.toggle("hidden", state.project.nodes.length > 0);
-  if (state.selectedNodeId) requestAnimationFrame(() => positionQuickActions(state.selectedNodeId));
-  requestAnimationFrame(renderEdges);
+  requestAnimationFrame(applyCamera);
 }
 
 function renderEdges() {
@@ -416,8 +546,9 @@ async function addChapter() {
 async function addNode(type = "plot", shape = "rounded", position = null) {
   if (!requireProject("添加故事节点")) return;
   const viewport = $("#mapViewport");
-  const x = position?.x ?? Math.max(24, viewport.clientWidth / 2 - 84 + (Math.random() - .5) * 100);
-  const y = position?.y ?? Math.max(24, viewport.clientHeight / 2 - 50 + (Math.random() - .5) * 80);
+  ensureCanvasState();
+  const x = position?.x ?? viewport.clientWidth / 2 - state.camera.x - 84 + (Math.random() - .5) * 100;
+  const y = position?.y ?? viewport.clientHeight / 2 - state.camera.y - 50 + (Math.random() - .5) * 80;
   try {
     const shapeNames = {
       rectangle: "新流程", rounded: "新节点", diamond: "新判断", circle: "新节点",
@@ -430,6 +561,7 @@ async function addNode(type = "plot", shape = "rounded", position = null) {
     state.selectedNodeIds = new Set([node.id]);
     state.selectedEdgeId = null;
     state.selectedEdgeIds.clear();
+    expandCanvasBoundsForNodes();
     renderMap();
     positionQuickActions(node.id);
   } catch (error) { toast(error.message); }
@@ -441,8 +573,8 @@ function positionQuickActions(nodeId) {
   const bar = $("#nodeQuickActions");
   if (!node || !element) { bar.hidden = true; return; }
   bar.hidden = false;
-  bar.style.left = `${Math.max(8, node.x + element.offsetWidth / 2)}px`;
-  bar.style.top = `${Math.max(8, node.y - 54)}px`;
+  bar.style.left = `${Math.max(8, node.x + state.camera.x + element.offsetWidth / 2)}px`;
+  bar.style.top = `${Math.max(8, node.y + state.camera.y - 54)}px`;
   bar.style.transform = "translateX(-50%)";
   const linkButton = bar.querySelector('[data-node-action="link"]');
   linkButton.textContent = node.chapter_id ? "更改章节" : "连接章节";
@@ -621,13 +753,16 @@ function openNodeLinkedContent(node) {
 }
 
 function focusNodeOnMap(nodeId) {
-  if (!state.project?.nodes.some(node => node.id === nodeId)) return;
+  const node = state.project?.nodes.find(item => item.id === nodeId);
+  if (!node) return;
   state.selectedNodeId = nodeId;
   state.selectedNodeIds = new Set([nodeId]);
   state.selectedEdgeId = null;
   state.selectedEdgeIds.clear();
   switchView("map");
   requestAnimationFrame(() => {
+    const size = nodeWorldSize(node);
+    centerCanvasOnWorldPoint(node.x + size.width / 2, node.y + size.height / 2);
     const element = document.querySelector(`.story-node[data-node-id="${nodeId}"]`);
     if (!element) return;
     element.classList.add("focus-pulse");
@@ -636,13 +771,24 @@ function focusNodeOnMap(nodeId) {
 }
 
 function focusEdgeOnMap(edgeId) {
-  if (!state.project?.edges.some(edge => edge.id === edgeId)) return;
+  const edge = state.project?.edges.find(item => item.id === edgeId);
+  if (!edge) return;
   state.selectedNodeId = null;
   state.selectedNodeIds.clear();
   state.selectedEdgeId = edgeId;
   state.selectedEdgeIds = new Set([edgeId]);
   switchView("map");
-  requestAnimationFrame(renderEdges);
+  requestAnimationFrame(() => {
+    const source = state.project.nodes.find(node => node.id === edge.source_id);
+    const target = state.project.nodes.find(node => node.id === edge.target_id);
+    if (source && target) {
+      const sourceSize = nodeWorldSize(source); const targetSize = nodeWorldSize(target);
+      centerCanvasOnWorldPoint(
+        (source.x + sourceSize.width / 2 + target.x + targetSize.width / 2) / 2,
+        (source.y + sourceSize.height / 2 + target.y + targetSize.height / 2) / 2,
+      );
+    } else renderEdges();
+  });
 }
 
 async function createEdgeBetween(sourceId, targetId, sourcePort = "right", targetPort = "left") {
@@ -765,6 +911,7 @@ function updateConnectionTarget(clientX, clientY, sourceId, viewport) {
 function bindNodeInteractions() {
   const layer = $("#nodeLayer");
   layer.addEventListener("pointerdown", event => {
+    if (state.panMode || state.spacePressed || event.button === 1) return;
     const port = event.target.closest(".node-port");
     if (port) {
       event.preventDefault();
@@ -802,16 +949,16 @@ function bindNodeInteractions() {
     const element = event.target.closest(".story-node");
     if (!element || event.button !== 0 || event.target.closest(".node-note-card, .node-menu-button") || $("#connectButton").classList.contains("active")) return;
     const node = state.project.nodes.find(item => item.id === element.dataset.nodeId);
-    const viewport = $("#mapViewport").getBoundingClientRect();
     const startX = event.clientX; const startY = event.clientY; const originX = node.x; const originY = node.y;
     let moved = false;
     element.setPointerCapture(event.pointerId);
     const move = moveEvent => {
       const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
       if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-      node.x = Math.max(0, Math.min(viewport.width - element.offsetWidth, originX + dx));
-      node.y = Math.max(0, Math.min(viewport.height - element.offsetHeight, originY + dy));
+      node.x = originX + dx;
+      node.y = originY + dy;
       element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; renderEdges();
+      expandCanvasBoundsForNodes(); renderMinimap();
       if (state.selectedNodeId === node.id) positionQuickActions(node.id);
     };
     const up = () => {
@@ -871,9 +1018,97 @@ function edgePathIntersectsRegion(path, region, viewportBounds) {
   } catch (_) { return false; }
 }
 
+function startCanvasPan(event) {
+  event.preventDefault();
+  const viewport = $("#mapViewport");
+  const startX = event.clientX; const startY = event.clientY;
+  const origin = { ...state.camera };
+  viewport.classList.add("panning");
+  const move = moveEvent => {
+    state.camera.x = origin.x + moveEvent.clientX - startX;
+    state.camera.y = origin.y + moveEvent.clientY - startY;
+    applyCamera();
+  };
+  const finish = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", finish);
+    viewport.classList.remove("panning");
+    state.ignoreCanvasClick = true;
+    setTimeout(() => { state.ignoreCanvasClick = false; }, 120);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", finish, { once: true });
+}
+
+function bindMinimapInteractions() {
+  const viewport = $("#mapViewport"); const panel = $("#minimapPanel"); const handle = $("#minimapHandle"); const svg = $("#minimapSvg");
+  try {
+    const saved = JSON.parse(localStorage.getItem("motu.minimapPosition") || "null");
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+      panel.style.left = `${saved.left}px`; panel.style.top = `${saved.top}px`; panel.style.right = "auto"; panel.style.bottom = "auto";
+    }
+  } catch (_) {}
+  handle.addEventListener("pointerdown", event => {
+    event.preventDefault(); event.stopPropagation();
+    const viewportRect = viewport.getBoundingClientRect(); const panelRect = panel.getBoundingClientRect();
+    const startX = event.clientX; const startY = event.clientY;
+    const originLeft = panelRect.left - viewportRect.left; const originTop = panelRect.top - viewportRect.top;
+    const move = moveEvent => {
+      const left = Math.max(8, Math.min(viewport.clientWidth - panel.offsetWidth - 8, originLeft + moveEvent.clientX - startX));
+      const top = Math.max(8, Math.min(viewport.clientHeight - panel.offsetHeight - 8, originTop + moveEvent.clientY - startY));
+      panel.style.left = `${left}px`; panel.style.top = `${top}px`; panel.style.right = "auto"; panel.style.bottom = "auto";
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish);
+      localStorage.setItem("motu.minimapPosition", JSON.stringify({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) }));
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish, { once: true });
+  });
+  svg.addEventListener("pointerdown", event => {
+    event.preventDefault(); event.stopPropagation();
+    const svgRect = svg.getBoundingClientRect(); const bounds = state.canvasBounds;
+    if (!bounds || !svgRect.width || !svgRect.height) return;
+    const scaleX = (bounds.maxX - bounds.minX) / svgRect.width; const scaleY = (bounds.maxY - bounds.minY) / svgRect.height;
+    let originCamera = { ...state.camera }; const startX = event.clientX; const startY = event.clientY;
+    if (!event.target.closest("#minimapViewportRect")) {
+      const worldX = bounds.minX + (event.clientX - svgRect.left) * scaleX;
+      const worldY = bounds.minY + (event.clientY - svgRect.top) * scaleY;
+      state.camera.x = viewport.clientWidth / 2 - worldX; state.camera.y = viewport.clientHeight / 2 - worldY; applyCamera();
+      originCamera = { ...state.camera };
+    }
+    const move = moveEvent => {
+      state.camera.x = originCamera.x - (moveEvent.clientX - startX) * scaleX;
+      state.camera.y = originCamera.y - (moveEvent.clientY - startY) * scaleY;
+      applyCamera();
+    };
+    const finish = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish, { once: true });
+  });
+  $("#centerCanvasButton").addEventListener("click", event => { event.stopPropagation(); centerCanvasOnAnchor(); });
+  $("#panModeButton").addEventListener("click", event => {
+    event.stopPropagation(); state.panMode = !state.panMode;
+    event.currentTarget.classList.toggle("active", state.panMode);
+    viewport.classList.toggle("pan-mode", state.panMode);
+    event.currentTarget.textContent = state.panMode ? "退出抓手" : "抓手";
+  });
+  viewport.addEventListener("wheel", event => {
+    if (event.target.closest(".minimap-panel")) return;
+    event.preventDefault(); panCanvasBy(-event.deltaX, -event.deltaY);
+  }, { passive: false });
+  document.addEventListener("keydown", event => {
+    if (event.code !== "Space" || event.target.matches("input, textarea, select, button")) return;
+    event.preventDefault(); state.spacePressed = true; viewport.classList.add("space-pan");
+  });
+  document.addEventListener("keyup", event => {
+    if (event.code === "Space") { state.spacePressed = false; viewport.classList.remove("space-pan"); }
+  });
+  window.addEventListener("blur", () => { state.spacePressed = false; viewport.classList.remove("space-pan", "panning"); });
+}
+
 function bindCanvasSelection() {
   const viewport = $("#mapViewport");
   viewport.addEventListener("pointerdown", event => {
+    if (state.panMode || state.spacePressed || event.button === 1) { startCanvasPan(event); return; }
     if (event.button !== 0 || event.target.closest("button, .story-node, .node-quick-actions, .canvas-context-menu, .map-empty, [data-edge-id]")) return;
     const bounds = viewport.getBoundingClientRect();
     const start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top, clientX: event.clientX, clientY: event.clientY };
@@ -973,7 +1208,7 @@ function bindEvents() {
     if (!raw) return;
     event.preventDefault();
     const item = JSON.parse(raw); const rect = $("#mapViewport").getBoundingClientRect();
-    addNode(item.type, item.shape, { x: Math.max(8, event.clientX - rect.left - 80), y: Math.max(8, event.clientY - rect.top - 40) });
+    addNode(item.type, item.shape, { x: event.clientX - rect.left - state.camera.x - 80, y: event.clientY - rect.top - state.camera.y - 40 });
   });
   $("#mapViewport").addEventListener("click", event => {
     if (state.ignoreCanvasClick) { state.ignoreCanvasClick = false; return; }
@@ -1071,12 +1306,13 @@ function bindEvents() {
   $(".inspector-heading button").addEventListener("click", () => $(".inspector").classList.add("hidden"));
   bindNodeInteractions();
   bindCanvasSelection();
+  bindMinimapInteractions();
   document.addEventListener("pointerdown", event => {
     if (!event.target.closest("#canvasContextMenu")) $("#canvasContextMenu").hidden = true;
     const inspector = $("#inspector");
     if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
   });
-  window.addEventListener("resize", () => requestAnimationFrame(renderEdges));
+  window.addEventListener("resize", () => requestAnimationFrame(applyCamera));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));
 }
 
