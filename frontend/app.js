@@ -203,15 +203,29 @@ function renderLinkedNodes() {
   const nodes = scene
     ? state.project.nodes.filter(node => node.scene_id === scene.id)
     : state.project.nodes.filter(node => node.chapter_id === state.activeChapterId && !node.scene_id);
-  $("#linkedNodeBar").innerHTML = nodes.length
-    ? `<span class="linked-node-label">关联故事节点</span>${nodes.map(node => `<button class="linked-node-pill" type="button" data-linked-node-id="${node.id}">${escapeHtml(node.label)}</button>`).join("")}`
-    : "";
+  const edges = state.project.edges.filter(edge => edge.chapter_id === state.activeChapterId);
+  const nodeMap = new Map(state.project.nodes.map(node => [node.id, node.label]));
+  const pills = [
+    ...nodes.map(node => `<button class="linked-node-pill" type="button" data-linked-node-id="${node.id}">图形 · ${escapeHtml(node.label)}</button>`),
+    ...edges.map(edge => `<button class="linked-node-pill linked-edge-pill" type="button" data-linked-edge-id="${edge.id}">箭头 · ${escapeHtml(nodeMap.get(edge.source_id) || "起点")} → ${escapeHtml(nodeMap.get(edge.target_id) || "终点")}</button>`),
+  ];
+  $("#linkedNodeBar").innerHTML = pills.length ? `<span class="linked-node-label">关联故事地图</span>${pills.join("")}` : "";
 }
 
 function renderChapterOptions() {
   const currentValue = $("#nodeChapter").value;
   $("#nodeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map((chapter, index) => `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`).join("")}`;
   $("#nodeChapter").value = currentValue;
+}
+
+function nodePortMarkup(shape) {
+  const ports = shape === "hexagon"
+    ? [
+        ["top_left", "左上角"], ["top_right", "右上角"], ["right", "右侧角"],
+        ["bottom_right", "右下角"], ["bottom_left", "左下角"], ["left", "左侧角"],
+      ]
+    : [["top", "上方"], ["right", "右侧"], ["bottom", "下方"], ["left", "左侧"]];
+  return ports.map(([port, label]) => `<button class="node-port port-${port.replaceAll("_", "-")}" data-port="${port}" type="button" title="从${label}连接"></button>`).join("");
 }
 
 function renderMap() {
@@ -223,10 +237,7 @@ function renderMap() {
     const noteCards = notes.map(note => `<div class="node-note-card ${note.locked ? "locked" : ""}" data-note-id="${note.id}" title="点击编辑便签">${escapeHtml(note.content)}</div>`).join("");
     const selected = node.id === state.selectedNodeId || state.selectedNodeIds.has(node.id);
     return `<article class="story-node shape-${node.shape} ${selected ? "selected" : ""}" data-node-id="${node.id}" data-color="${node.color}" style="left:${node.x}px;top:${node.y}px" tabindex="0">
-    <button class="node-port port-top" data-port="top" type="button" title="从上方连接"></button>
-    <button class="node-port port-right" data-port="right" type="button" title="从右侧连接"></button>
-    <button class="node-port port-bottom" data-port="bottom" type="button" title="从下方连接"></button>
-    <button class="node-port port-left" data-port="left" type="button" title="从左侧连接"></button>
+    ${nodePortMarkup(node.shape)}
     <button class="node-menu-button" type="button" title="节点操作">•••</button>
     ${notes.length ? `<div class="node-notes-popover has-notes ${notes.some(note => note.locked) ? "has-locked" : ""}">${noteCards}</div>` : ""}
     <div class="node-inner"><span class="node-type">${nodeTypeNames[node.node_type] || "节点"}</span>
@@ -244,26 +255,39 @@ function renderEdges() {
   if (!state.project) return;
   const viewport = $("#mapViewport").getBoundingClientRect();
   const positions = new Map();
+  const shapeMap = new Map(state.project.nodes.map(node => [node.id, node.shape]));
   $$(".story-node").forEach(element => {
     const rect = element.getBoundingClientRect();
     positions.set(element.dataset.nodeId, {
       top: { x: rect.left - viewport.left + rect.width / 2, y: rect.top - viewport.top },
+      top_left: { x: rect.left - viewport.left + rect.width * .25, y: rect.top - viewport.top },
+      top_right: { x: rect.left - viewport.left + rect.width * .75, y: rect.top - viewport.top },
       right: { x: rect.right - viewport.left, y: rect.top - viewport.top + rect.height / 2 },
       bottom: { x: rect.left - viewport.left + rect.width / 2, y: rect.bottom - viewport.top },
+      bottom_right: { x: rect.left - viewport.left + rect.width * .75, y: rect.bottom - viewport.top },
+      bottom_left: { x: rect.left - viewport.left + rect.width * .25, y: rect.bottom - viewport.top },
       left: { x: rect.left - viewport.left, y: rect.top - viewport.top + rect.height / 2 },
     });
   });
   $("#edgeLayer").setAttribute("viewBox", `0 0 ${Math.max(1, viewport.width)} ${Math.max(1, viewport.height)}`);
   const paths = state.project.edges.map(edge => {
-    const source = positions.get(edge.source_id)?.[edge.source_port || "right"];
-    const target = positions.get(edge.target_id)?.[edge.target_port || "left"];
+    const sourcePort = normalizedEdgePort(shapeMap.get(edge.source_id), edge.source_port || "right", "source");
+    const targetPort = normalizedEdgePort(shapeMap.get(edge.target_id), edge.target_port || "left", "target");
+    const source = positions.get(edge.source_id)?.[sourcePort];
+    const target = positions.get(edge.target_id)?.[targetPort];
     if (!source || !target) return "";
-    const path = connectorPath(source, target, edge.source_port || "right", edge.target_port || "left");
+    const path = connectorPath(source, target, sourcePort, targetPort);
     const middle = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 - 7 };
     const style = edge.line_style || "solid";
+    const color = edge.color || "blue";
     const selected = edge.id === state.selectedEdgeId ? " selected" : "";
-    const label = edge.label?.trim() ? `<text class="edge-label" x="${middle.x}" y="${middle.y}" text-anchor="middle">${escapeHtml(edge.label.trim().split(/\r?\n/)[0].slice(0, 28))}</text>` : "";
-    return `<path class="edge-hit" data-edge-id="${edge.id}" d="${path}"/><path class="edge-line line-${style}${selected}" data-edge-id="${edge.id}" d="${path}"/>${label}`;
+    const chapter = state.project.chapters.find(item => item.id === edge.chapter_id);
+    const chapterIndex = chapter ? state.project.chapters.indexOf(chapter) + 1 : 0;
+    const lines = [];
+    if (edge.label?.trim()) lines.push(edge.label.trim().split(/\r?\n/)[0].slice(0, 28));
+    if (chapter) lines.push(`链接 ${String(chapterIndex).padStart(2, "0")} · ${chapter.title.slice(0, 24)}`);
+    const label = lines.length ? `<text class="edge-label" x="${middle.x}" y="${middle.y - (lines.length - 1) * 7}" text-anchor="middle">${lines.map((line, index) => `<tspan x="${middle.x}" dy="${index ? 15 : 0}">${escapeHtml(line)}</tspan>`).join("")}</text>` : "";
+    return `<path class="edge-hit" data-edge-id="${edge.id}" d="${path}"/><path class="edge-line line-${style}${selected}" data-edge-color="${color}" marker-end="url(#arrow-${color})" data-edge-id="${edge.id}" d="${path}"/>${label}`;
   }).join("");
   let preview = "";
   if (state.portDrag) {
@@ -271,11 +295,24 @@ function renderEdges() {
     const target = state.portDrag.pointer;
     if (source && target) preview = `<path class="edge-preview" d="${connectorPath(source, target, state.portDrag.sourcePort, "left")}"/>`;
   }
-  $("#edgeLayer").innerHTML = `<defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>${paths}${preview}`;
+  const markerColors = { blue: "#6f93c5", violet: "#7c3aed", green: "#0f9f78", amber: "#e59a28", rose: "#dc5670", slate: "#64748b" };
+  const markers = Object.entries(markerColors).map(([name, value]) => `<marker id="arrow-${name}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${value}"></path></marker>`).join("");
+  $("#edgeLayer").innerHTML = `<defs>${markers}</defs>${paths}${preview}`;
+}
+
+function normalizedEdgePort(shape, port, role) {
+  if (shape !== "hexagon") return port;
+  if (port === "top") return role === "source" ? "top_right" : "top_left";
+  if (port === "bottom") return role === "source" ? "bottom_right" : "bottom_left";
+  return port;
 }
 
 function connectorPath(source, target, sourcePort, targetPort) {
-  const vectors = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
+  const vectors = {
+    top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0],
+    top_left: [-.5, -.866], top_right: [.5, -.866],
+    bottom_right: [.5, .866], bottom_left: [-.5, .866],
+  };
   const sourceVector = vectors[sourcePort] || vectors.right;
   const targetVector = vectors[targetPort] || vectors.left;
   const distance = Math.hypot(target.x - source.x, target.y - source.y);
@@ -315,7 +352,10 @@ function switchView(view) {
   panel.classList.add("active", "mobile-active");
   $(".chapter-panel").classList.remove("mobile-active");
   $$(".mobile-nav button").forEach(button => button.classList.toggle("active", button.dataset.mobile === view));
-  if (view === "map") requestAnimationFrame(renderMap);
+  if (view === "map") {
+    $(".inspector").classList.add("hidden");
+    requestAnimationFrame(renderMap);
+  }
 }
 
 function queueDocumentSave() {
@@ -562,7 +602,6 @@ function focusNodeOnMap(nodeId) {
   state.selectedNodeIds = new Set([nodeId]);
   state.selectedEdgeId = null;
   switchView("map");
-  openInspector(nodeId);
   requestAnimationFrame(() => {
     const element = document.querySelector(`.story-node[data-node-id="${nodeId}"]`);
     if (!element) return;
@@ -571,12 +610,21 @@ function focusNodeOnMap(nodeId) {
   });
 }
 
+function focusEdgeOnMap(edgeId) {
+  if (!state.project?.edges.some(edge => edge.id === edgeId)) return;
+  state.selectedNodeId = null;
+  state.selectedNodeIds.clear();
+  state.selectedEdgeId = edgeId;
+  switchView("map");
+  requestAnimationFrame(renderEdges);
+}
+
 async function createEdgeBetween(sourceId, targetId, sourcePort = "right", targetPort = "left") {
   if (sourceId === targetId) { toast("请选择另一个图形"); return null; }
   try {
     const edge = await api(`/api/projects/${state.project.id}/edges`, {
       method: "POST",
-      body: JSON.stringify({ source_id: sourceId, target_id: targetId, label: "", source_port: sourcePort, target_port: targetPort, line_style: "solid" }),
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId, label: "", source_port: sourcePort, target_port: targetPort, line_style: "solid", color: "blue" }),
     });
     state.project.edges.push(edge);
     state.selectedEdgeId = edge.id;
@@ -596,6 +644,7 @@ function openEdgeDialog(edgeId) {
   state.selectedNodeIds.clear();
   $("#edgeNote").value = edge.label || "";
   $("#edgeStyle").value = edge.line_style || "solid";
+  $$("#edgeColorPicker [data-edge-color]").forEach(button => button.classList.toggle("active", button.dataset.edgeColor === (edge.color || "blue")));
   $("#edgeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map((chapter, index) => `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`).join("")}`;
   $("#edgeChapter").value = edge.chapter_id || "";
   $("#openEdgeChapterButton").disabled = !edge.chapter_id;
@@ -606,7 +655,8 @@ function openEdgeDialog(edgeId) {
 async function saveSelectedEdge() {
   const edge = state.project?.edges.find(item => item.id === state.selectedEdgeId);
   if (!edge) return;
-  const payload = { label: $("#edgeNote").value.trim(), line_style: $("#edgeStyle").value, chapter_id: $("#edgeChapter").value || null };
+  const color = $("#edgeColorPicker [data-edge-color].active")?.dataset.edgeColor || "blue";
+  const payload = { label: $("#edgeNote").value.trim(), line_style: $("#edgeStyle").value, chapter_id: $("#edgeChapter").value || null, color };
   try {
     const updated = await api(`/api/edges/${edge.id}`, { method: "PATCH", body: JSON.stringify(payload) });
     Object.assign(edge, updated);
@@ -616,10 +666,9 @@ async function saveSelectedEdge() {
   } catch (error) { toast(error.message); }
 }
 
-async function deleteSelectedEdge(confirmDelete = true) {
+async function deleteSelectedEdge() {
   const edge = state.project?.edges.find(item => item.id === state.selectedEdgeId);
   if (!edge) return;
-  if (confirmDelete && !confirm("删除这条箭头？")) return;
   try {
     await api(`/api/edges/${edge.id}`, { method: "DELETE" });
     state.project.edges = state.project.edges.filter(item => item.id !== edge.id);
@@ -814,6 +863,7 @@ function bindEvents() {
     editor.focus(); queueDocumentSave();
   }));
   $("#focusButton").addEventListener("click", () => $("#app").classList.toggle("focus-mode"));
+  $("#editorMapButton").addEventListener("click", () => switchView("map"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
   $("#testConnection").addEventListener("click", testConnection);
   $("#saveSettings").addEventListener("click", saveSettings);
@@ -904,6 +954,11 @@ function bindEvents() {
   $("#saveEdgeButton").addEventListener("click", saveSelectedEdge);
   $("#deleteEdgeButton").addEventListener("click", () => deleteSelectedEdge());
   $("#openEdgeChapterButton").addEventListener("click", openSelectedEdgeChapter);
+  $("#edgeColorPicker").addEventListener("click", event => {
+    const button = event.target.closest("[data-edge-color]");
+    if (!button) return;
+    $$("#edgeColorPicker [data-edge-color]").forEach(item => item.classList.toggle("active", item === button));
+  });
   $("#nodeType").addEventListener("change", queueNodeSave);
   $("#nodeChapter").addEventListener("change", queueNodeSave);
   $("#createSceneButton").addEventListener("click", createSceneFromSelectedNode);
@@ -915,8 +970,10 @@ function bindEvents() {
     const node = state.project?.nodes.find(item => item.id === state.selectedNodeId); openNodeLinkedContent(node);
   });
   $("#linkedNodeBar").addEventListener("click", event => {
-    const button = event.target.closest("[data-linked-node-id]");
-    if (button) focusNodeOnMap(button.dataset.linkedNodeId);
+    const nodeButton = event.target.closest("[data-linked-node-id]");
+    const edgeButton = event.target.closest("[data-linked-edge-id]");
+    if (nodeButton) focusNodeOnMap(nodeButton.dataset.linkedNodeId);
+    if (edgeButton) focusEdgeOnMap(edgeButton.dataset.linkedEdgeId);
   });
   $("#deleteNodeButton").addEventListener("click", deleteSelectedNode);
   $(".inspector-heading button").addEventListener("click", () => $(".inspector").classList.add("hidden"));
@@ -974,8 +1031,6 @@ async function deleteSelectedNode() {
   const ids = state.selectedNodeIds.size ? [...state.selectedNodeIds] : (state.selectedNodeId ? [state.selectedNodeId] : []);
   const nodes = state.project?.nodes.filter(item => ids.includes(item.id)) || [];
   if (!nodes.length) return;
-  const message = nodes.length === 1 ? `删除节点“${nodes[0].label}”？相关连线也会删除。` : `删除选中的 ${nodes.length} 个图形？相关箭头也会一起删除。`;
-  if (!confirm(message)) return;
   try {
     await Promise.all(ids.map(id => api(`/api/nodes/${id}`, { method: "DELETE" })));
     const deletedIds = new Set(ids);
@@ -993,7 +1048,7 @@ function mobileNavigate(target) {
   $(".chapter-panel").classList.remove("mobile-active");
   $$(".view-panel").forEach(panel => panel.classList.remove("mobile-active"));
   if (target === "chapters") $(".chapter-panel").classList.add("mobile-active");
-  else if (target === "map") { $("#mapView").classList.add("active", "mobile-active"); requestAnimationFrame(renderMap); }
+  else if (target === "map") { $(".inspector").classList.add("hidden"); $("#mapView").classList.add("active", "mobile-active"); requestAnimationFrame(renderMap); }
   else if (target === "settings") $("#settingsDialog").showModal();
   else $("#writeView").classList.add("active", "mobile-active");
 }

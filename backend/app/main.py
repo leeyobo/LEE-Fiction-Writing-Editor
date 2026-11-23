@@ -96,6 +96,7 @@ def init_db() -> None:
                 label TEXT NOT NULL DEFAULT '',
                 chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL,
                 line_style TEXT NOT NULL DEFAULT 'solid',
+                color TEXT NOT NULL DEFAULT 'blue',
                 source_port TEXT NOT NULL DEFAULT 'right',
                 target_port TEXT NOT NULL DEFAULT 'left',
                 created_at TEXT NOT NULL,
@@ -128,6 +129,7 @@ def init_db() -> None:
         edge_migrations = {
             "chapter_id": "ALTER TABLE edges ADD COLUMN chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL",
             "line_style": "ALTER TABLE edges ADD COLUMN line_style TEXT NOT NULL DEFAULT 'solid'",
+            "color": "ALTER TABLE edges ADD COLUMN color TEXT NOT NULL DEFAULT 'blue'",
             "source_port": "ALTER TABLE edges ADD COLUMN source_port TEXT NOT NULL DEFAULT 'right'",
             "target_port": "ALTER TABLE edges ADD COLUMN target_port TEXT NOT NULL DEFAULT 'left'",
         }
@@ -234,20 +236,26 @@ class EdgeCreate(BaseModel):
     label: str = Field(default="", max_length=5000)
     chapter_id: Optional[str] = None
     line_style: Literal["solid", "dashed", "dotted"] = "solid"
-    source_port: Literal["top", "right", "bottom", "left"] = "right"
-    target_port: Literal["top", "right", "bottom", "left"] = "left"
+    color: str = Field(default="blue", pattern="^(blue|violet|amber|green|rose|slate)$")
+    source_port: Literal[
+        "top", "right", "bottom", "left", "top_left", "top_right", "bottom_right", "bottom_left"
+    ] = "right"
+    target_port: Literal[
+        "top", "right", "bottom", "left", "top_left", "top_right", "bottom_right", "bottom_left"
+    ] = "left"
 
 
 class EdgeUpdate(BaseModel):
     label: Optional[str] = Field(default=None, max_length=5000)
     chapter_id: Optional[str] = None
     line_style: Optional[Literal["solid", "dashed", "dotted"]] = None
+    color: Optional[str] = Field(default=None, pattern="^(blue|violet|amber|green|rose|slate)$")
 
 
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.4.0",
+    version="0.5.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -265,7 +273,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.4.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.5.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -606,11 +614,12 @@ def create_edge(project_id: str, payload: EdgeCreate):
             connection.execute(
                 """INSERT INTO edges(
                        id, project_id, source_id, target_id, label, chapter_id,
-                       line_style, source_port, target_port, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       line_style, color, source_port, target_port, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     edge_id, project_id, payload.source_id, payload.target_id, payload.label,
-                    payload.chapter_id, payload.line_style, payload.source_port, payload.target_port, timestamp,
+                    payload.chapter_id, payload.line_style, payload.color,
+                    payload.source_port, payload.target_port, timestamp,
                 ),
             )
         except sqlite3.IntegrityError:

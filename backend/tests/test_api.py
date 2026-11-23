@@ -40,23 +40,26 @@ class ApiFlowTest(unittest.TestCase):
         ).json()
         second = self.client.post(
             f"/api/projects/{project['id']}/nodes",
-            json={"label": "Visitor", "node_type": "character", "shape": "pill", "color": "violet", "x": 320, "y": 90},
+            json={"label": "Visitor", "node_type": "character", "shape": "hexagon", "color": "violet", "x": 320, "y": 90},
         ).json()
         edge = self.client.post(
             f"/api/projects/{project['id']}/edges",
             json={
                 "source_id": first["id"], "target_id": second["id"], "label": "introduces",
-                "source_port": "bottom", "target_port": "top", "line_style": "dashed",
+                "source_port": "bottom", "target_port": "top_left", "line_style": "dashed", "color": "green",
             },
         )
         self.assertEqual(edge.status_code, 201)
         self.assertEqual(edge.json()["source_port"], "bottom")
+        self.assertEqual(edge.json()["target_port"], "top_left")
+        self.assertEqual(edge.json()["color"], "green")
         edge_update = self.client.patch(
             f"/api/edges/{edge.json()['id']}",
-            json={"label": "A conditional transition", "chapter_id": chapter["id"], "line_style": "dotted"},
+            json={"label": "A conditional transition", "chapter_id": chapter["id"], "line_style": "dotted", "color": "rose"},
         )
         self.assertEqual(edge_update.status_code, 200)
         self.assertEqual(edge_update.json()["line_style"], "dotted")
+        self.assertEqual(edge_update.json()["color"], "rose")
 
         scene_link = self.client.post(
             f"/api/nodes/{first['id']}/scene",
@@ -127,7 +130,7 @@ class ApiFlowTest(unittest.TestCase):
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scenes'"
             ).fetchone()
         self.assertIn("scene_id", columns)
-        self.assertTrue({"chapter_id", "line_style", "source_port", "target_port"}.issubset(edge_columns))
+        self.assertTrue({"chapter_id", "line_style", "color", "source_port", "target_port"}.issubset(edge_columns))
         self.assertIsNotNone(scene_table)
 
     def test_api_key_protects_writing_data(self):

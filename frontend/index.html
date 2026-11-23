@@ -58,7 +58,7 @@
               <button type="button" data-prefix="> ">引用</button>
               <button type="button" data-prefix="- ">列表</button>
             </div>
-            <div class="editor-meta"><span id="chapterWords">0 字</span><span>Markdown</span></div>
+            <div class="editor-meta"><button id="editorMapButton" class="editor-map-button" type="button">故事地图</button><span id="chapterWords">0 字</span><span>Markdown</span></div>
           </div>
           <article class="paper">
             <div class="paper-heading">
@@ -184,6 +184,8 @@
         <div class="modal-heading"><div><p class="eyebrow">ARROW DETAILS</p><h2>箭头设置</h2></div><button value="cancel" type="submit">×</button></div>
         <label>箭头备注<textarea id="edgeNote" rows="5" maxlength="5000" placeholder="记录关系、转折、条件或伏笔…"></textarea></label>
         <label>线条样式<select id="edgeStyle"><option value="solid">实线</option><option value="dashed">虚线</option><option value="dotted">点线</option></select></label>
+        <label>箭头颜色</label>
+        <div id="edgeColorPicker" class="color-picker edge-color-picker" aria-label="箭头颜色"><button type="button" data-edge-color="blue" aria-label="蓝色"></button><button type="button" data-edge-color="violet" aria-label="紫色"></button><button type="button" data-edge-color="green" aria-label="绿色"></button><button type="button" data-edge-color="amber" aria-label="橙色"></button><button type="button" data-edge-color="rose" aria-label="红色"></button><button type="button" data-edge-color="slate" aria-label="灰色"></button></div>
         <label>链接章节<select id="edgeChapter"><option value="">不链接章节</option></select></label>
         <p class="modal-copy">保存后，点击箭头可打开其链接章节；右键箭头可以重新编辑或删除。</p>
         <div class="modal-actions edge-actions"><button id="deleteEdgeButton" class="danger-inline" type="button">删除箭头</button><button id="openEdgeChapterButton" class="secondary-button" type="button">打开章节</button><button id="saveEdgeButton" class="primary-button" type="button">保存设置</button></div>
