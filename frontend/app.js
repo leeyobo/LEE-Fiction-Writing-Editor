@@ -295,7 +295,8 @@ function renderEdges() {
   if (state.portDrag) {
     const source = positions.get(state.portDrag.sourceId)?.[state.portDrag.sourcePort];
     const target = state.portDrag.pointer;
-    if (source && target) preview = `<path class="edge-preview" d="${connectorPath(source, target, state.portDrag.sourcePort, "left")}"/>`;
+    const targetPort = state.portDrag.targetPort || suggestedPreviewTargetPort(source, target);
+    if (source && target) preview = `<path class="edge-preview" d="${connectorPath(source, target, state.portDrag.sourcePort, targetPort)}"/>`;
   }
   const markerColors = { blue: "#6f93c5", violet: "#7c3aed", green: "#0f9f78", amber: "#e59a28", rose: "#dc5670", slate: "#64748b" };
   const markers = Object.entries(markerColors).map(([name, value]) => `<marker id="arrow-${name}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${value}"></path></marker>`).join("");
@@ -307,6 +308,24 @@ function normalizedEdgePort(shape, port, role) {
   if (port === "top") return role === "source" ? "top_right" : "top_left";
   if (port === "bottom") return role === "source" ? "bottom_right" : "bottom_left";
   return port;
+}
+
+function suggestedPreviewTargetPort(source, target) {
+  if (!source || !target) return "left";
+  const dx = target.x - source.x; const dy = target.y - source.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "left" : "right";
+  return dy >= 0 ? "top" : "bottom";
+}
+
+function suggestedPortsBetweenNodes(sourceId, targetId) {
+  const sourceElement = document.querySelector(`.story-node[data-node-id="${sourceId}"]`);
+  const targetElement = document.querySelector(`.story-node[data-node-id="${targetId}"]`);
+  if (!sourceElement || !targetElement) return { sourcePort: "right", targetPort: "left" };
+  const source = sourceElement.getBoundingClientRect(); const target = targetElement.getBoundingClientRect();
+  const dx = target.left + target.width / 2 - (source.left + source.width / 2);
+  const dy = target.top + target.height / 2 - (source.top + source.height / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? { sourcePort: "right", targetPort: "left" } : { sourcePort: "left", targetPort: "right" };
+  return dy >= 0 ? { sourcePort: "bottom", targetPort: "top" } : { sourcePort: "top", targetPort: "bottom" };
 }
 
 function connectorPath(source, target, sourcePort, targetPort) {
@@ -705,7 +724,42 @@ async function connectNode(targetId) {
   state.connectSourceId = null;
   $("#connectButton").classList.remove("active");
   $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
-  await createEdgeBetween(sourceId, targetId);
+  const ports = suggestedPortsBetweenNodes(sourceId, targetId);
+  await createEdgeBetween(sourceId, targetId, ports.sourcePort, ports.targetPort);
+}
+
+function clearConnectionTargets() {
+  $$(".story-node.connection-target").forEach(element => element.classList.remove("connection-target"));
+  $$(".node-port.snap-target").forEach(element => element.classList.remove("snap-target"));
+}
+
+function updateConnectionTarget(clientX, clientY, sourceId, viewport) {
+  clearConnectionTargets();
+  let nearestNode = null; let nearestDistance = Infinity;
+  $$(".story-node").forEach(element => {
+    if (element.dataset.nodeId === sourceId) return;
+    const rect = element.getBoundingClientRect();
+    const dx = Math.max(rect.left - clientX, 0, clientX - rect.right);
+    const dy = Math.max(rect.top - clientY, 0, clientY - rect.bottom);
+    const distance = Math.hypot(dx, dy);
+    if (distance < nearestDistance) { nearestDistance = distance; nearestNode = element; }
+  });
+  if (!nearestNode || nearestDistance > 72) return null;
+  nearestNode.classList.add("connection-target");
+  let nearestPort = null; let portDistance = Infinity;
+  nearestNode.querySelectorAll(".node-port").forEach(port => {
+    const rect = port.getBoundingClientRect();
+    const x = rect.left + rect.width / 2; const y = rect.top + rect.height / 2;
+    const distance = Math.hypot(x - clientX, y - clientY);
+    if (distance < portDistance) { portDistance = distance; nearestPort = { element: port, x, y }; }
+  });
+  if (!nearestPort || portDistance > 46) return null;
+  nearestPort.element.classList.add("snap-target");
+  return {
+    targetId: nearestNode.dataset.nodeId,
+    targetPort: nearestPort.element.dataset.port,
+    pointer: { x: nearestPort.x - viewport.left, y: nearestPort.y - viewport.top },
+  };
 }
 
 function bindNodeInteractions() {
@@ -723,7 +777,10 @@ function bindNodeInteractions() {
         pointer: { x: event.clientX - viewport.left, y: event.clientY - viewport.top },
       };
       const movePort = moveEvent => {
-        state.portDrag.pointer = { x: moveEvent.clientX - viewport.left, y: moveEvent.clientY - viewport.top };
+        const snapTarget = updateConnectionTarget(moveEvent.clientX, moveEvent.clientY, state.portDrag.sourceId, viewport);
+        state.portDrag.pointer = snapTarget?.pointer || { x: moveEvent.clientX - viewport.left, y: moveEvent.clientY - viewport.top };
+        state.portDrag.targetPort = snapTarget?.targetPort || null;
+        state.portDrag.snapTarget = snapTarget;
         renderEdges();
       };
       const finishPort = async upEvent => {
@@ -732,11 +789,11 @@ function bindNodeInteractions() {
         const targetPort = document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest(".node-port");
         const drag = state.portDrag;
         state.portDrag = null;
+        clearConnectionTargets();
         renderEdges();
-        if (targetPort) {
-          const targetId = targetPort.closest(".story-node")?.dataset.nodeId;
-          if (targetId) await createEdgeBetween(drag.sourceId, targetId, drag.sourcePort, targetPort.dataset.port);
-        }
+        const targetId = targetPort?.closest(".story-node")?.dataset.nodeId || drag.snapTarget?.targetId;
+        const targetPortName = targetPort?.dataset.port || drag.snapTarget?.targetPort;
+        if (targetId && targetPortName) await createEdgeBetween(drag.sourceId, targetId, drag.sourcePort, targetPortName);
       };
       window.addEventListener("pointermove", movePort);
       window.addEventListener("pointerup", finishPort, { once: true });
