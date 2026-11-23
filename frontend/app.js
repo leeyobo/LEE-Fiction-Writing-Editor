@@ -105,6 +105,7 @@ async function loadProject(projectId) {
   state.selectedNodeId = null;
   state.connectSourceId = null;
   renderAll();
+  switchView("map");
   setSaveState("已同步", "saved");
 }
 
