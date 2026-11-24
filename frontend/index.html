@@ -37,9 +37,10 @@
         <aside class="chapter-panel">
           <div class="panel-title-row">
             <div><p class="eyebrow">MANUSCRIPT</p><h2>作品目录</h2></div>
-            <button id="addChapterButton" class="add-button" type="button" title="新建章节">＋</button>
+            <div class="panel-title-actions"><button id="chapterBatchButton" class="chapter-batch-button" type="button" title="批量选择并删除章节">批量删除</button><button id="addChapterButton" class="add-button" type="button" title="新建章节">＋</button></div>
           </div>
           <label class="search-box"><span>⌕</span><input id="chapterSearch" type="search" placeholder="搜索章节" /></label>
+          <div id="chapterBatchBar" class="chapter-batch-bar" hidden><label><input id="selectAllChapters" type="checkbox" />全选</label><span id="selectedChapterCount">已选 0 章</span><button id="deleteSelectedChaptersButton" type="button" disabled>删除所选</button></div>
           <div class="volume-label"><span>第一卷</span><small id="chapterCount">0 章</small></div>
           <ol id="chapterList" class="chapter-list"></ol>
           <div class="sidebar-footer">
@@ -206,6 +207,17 @@
         <p class="modal-copy">所有流程图节点、连接线和节点便签都会永久删除。章节正文及已经创建的场景不会受到影响。</p>
         <p class="confirm-danger-copy">此操作无法撤销。</p>
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="confirmClearCanvasButton" class="danger-confirm-button" type="button">确认清空</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="chapterDeleteDialog" class="modal confirm-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DELETE CHAPTER</p><h2 id="chapterDeleteTitle">确认删除章节？</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
+        <div class="confirm-warning" aria-hidden="true">!</div>
+        <p id="chapterDeleteSummary" class="confirm-summary"></p>
+        <p id="chapterDeleteDetails" class="modal-copy"></p>
+        <p class="confirm-danger-copy">章节正文和所属场景将永久删除，此操作无法撤销。</p>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="confirmChapterDeleteButton" class="danger-confirm-button" type="button">确认删除</button></div>
       </form>
     </dialog>
 

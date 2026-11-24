@@ -173,6 +173,10 @@ class ChapterUpdate(BaseModel):
     position: Optional[int] = Field(default=None, ge=0)
 
 
+class ChapterBulkDelete(BaseModel):
+    chapter_ids: List[str] = Field(min_length=1)
+
+
 class SceneCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
 
@@ -255,7 +259,7 @@ class EdgeUpdate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.6.0",
+    version="0.7.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -273,7 +277,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.6.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.7.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -399,6 +403,42 @@ def delete_chapter(chapter_id: str):
             raise HTTPException(status_code=409, detail="作品至少需要保留一个章节")
         connection.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
     return Response(status_code=204)
+
+
+@app.post("/api/projects/{project_id}/chapters/bulk-delete", dependencies=[Depends(authorize)])
+def bulk_delete_chapters(project_id: str, payload: ChapterBulkDelete):
+    chapter_ids = list(dict.fromkeys(payload.chapter_ids))
+    placeholders = ", ".join("?" for _ in chapter_ids)
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        rows = connection.execute(
+            f"SELECT id FROM chapters WHERE project_id = ? AND id IN ({placeholders})",
+            (project_id, *chapter_ids),
+        ).fetchall()
+        if len(rows) != len(chapter_ids):
+            raise HTTPException(status_code=400, detail="部分章节不存在或不属于当前作品")
+        total = connection.execute(
+            "SELECT COUNT(*) AS count FROM chapters WHERE project_id = ?", (project_id,)
+        ).fetchone()["count"]
+        if total - len(chapter_ids) < 1:
+            raise HTTPException(status_code=409, detail="作品至少需要保留一个章节")
+        scene_count = connection.execute(
+            f"SELECT COUNT(*) AS count FROM scenes WHERE project_id = ? AND chapter_id IN ({placeholders})",
+            (project_id, *chapter_ids),
+        ).fetchone()["count"]
+        connection.execute(
+            f"DELETE FROM chapters WHERE project_id = ? AND id IN ({placeholders})",
+            (project_id, *chapter_ids),
+        )
+        remaining = connection.execute(
+            "SELECT id FROM chapters WHERE project_id = ? ORDER BY position, created_at", (project_id,)
+        ).fetchall()
+        for position, chapter in enumerate(remaining):
+            connection.execute("UPDATE chapters SET position = ? WHERE id = ?", (position, chapter["id"]))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now(), project_id))
+    return {"chapters": len(chapter_ids), "scenes": scene_count}
 
 
 @app.post("/api/chapters/{chapter_id}/scenes", status_code=201, dependencies=[Depends(authorize)])

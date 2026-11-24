@@ -19,6 +19,9 @@ const state = {
   connectSourceId: null,
   portDrag: null,
   selectionDrag: null,
+  chapterBulkMode: false,
+  selectedChapterIds: new Set(),
+  pendingChapterDeleteIds: [],
   camera: { x: 0, y: 0 },
   canvasAnchor: null,
   canvasBounds: null,
@@ -146,6 +149,9 @@ async function loadProject(projectId) {
   state.selectedEdgeId = null;
   state.selectedEdgeIds.clear();
   state.connectSourceId = null;
+  state.chapterBulkMode = false;
+  state.selectedChapterIds.clear();
+  state.pendingChapterDeleteIds = [];
   state.camera = { x: 0, y: 0 };
   state.canvasAnchor = null;
   state.canvasBounds = null;
@@ -164,24 +170,39 @@ function renderAll() {
   renderChapterOptions();
 }
 
+function chapterMatchesFilter(chapter, filter) {
+  const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
+  return chapter.title.toLowerCase().includes(filter) || scenes.some(scene => scene.title.toLowerCase().includes(filter));
+}
+
 function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase()) {
   if (!state.project) return;
-  const chapters = state.project.chapters.filter(chapter => {
-    const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
-    return chapter.title.toLowerCase().includes(filter) || scenes.some(scene => scene.title.toLowerCase().includes(filter));
-  });
+  $(".chapter-panel").classList.toggle("bulk-mode", state.chapterBulkMode);
+  $("#chapterBatchBar").hidden = !state.chapterBulkMode;
+  $("#chapterBatchButton").classList.toggle("active", state.chapterBulkMode);
+  $("#chapterBatchButton").textContent = state.chapterBulkMode ? "完成" : "批量删除";
+  $("#chapterBatchButton").disabled = state.project.chapters.length <= 1;
+  const chapters = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter));
   $("#chapterList").innerHTML = chapters.map(chapter => {
     const index = state.project.chapters.indexOf(chapter) + 1;
     const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
-    return `<li class="chapter-group">
-      <div class="chapter-item ${chapter.id === state.activeChapterId && !state.activeSceneId ? "active" : ""}" data-chapter-id="${chapter.id}">
+    const checked = state.selectedChapterIds.has(chapter.id);
+    return `<li class="chapter-group ${checked ? "selected-for-delete" : ""}">
+      <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${chapter.id === state.activeChapterId && !state.activeSceneId ? "active" : ""}" data-chapter-id="${chapter.id}">
+        ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
         <span class="chapter-number">${String(index).padStart(2, "0")}</span>
         <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${scenes.length ? `${scenes.length} 个场景` : (chapter.content ? escapeHtml(chapter.content.slice(0, 18).replace(/\s+/g, " ")) : "还没有正文")}</small></span>
-        <span class="chapter-words">${wordCount(chapter.content)}</span>
+        <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-delete-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
       </div>
       ${scenes.length ? `<ol class="scene-list">${scenes.map(scene => `<li class="scene-item ${scene.id === state.activeSceneId ? "active" : ""}" data-scene-id="${scene.id}"><span class="scene-glyph">◇</span><span class="scene-title">${escapeHtml(scene.title)}</span><span class="scene-words">${wordCount(scene.content)}</span></li>`).join("")}</ol>` : ""}
     </li>`;
   }).join("");
+  const selectedCount = state.selectedChapterIds.size;
+  $("#selectedChapterCount").textContent = `已选 ${selectedCount} 章`;
+  $("#deleteSelectedChaptersButton").disabled = selectedCount === 0;
+  const visibleSelectedCount = chapters.filter(chapter => state.selectedChapterIds.has(chapter.id)).length;
+  $("#selectAllChapters").checked = chapters.length > 0 && visibleSelectedCount === chapters.length;
+  $("#selectAllChapters").indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < chapters.length;
   $("#chapterCount").textContent = `${state.project.chapters.length} 章`;
   const chapterWords = state.project.chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0);
   const sceneWords = state.project.scenes.reduce((sum, scene) => sum + wordCount(scene.content), 0);
@@ -537,6 +558,8 @@ async function addChapter() {
   try {
     const chapter = await api(`/api/projects/${state.project.id}/chapters`, { method: "POST", body: JSON.stringify({ title: `第 ${state.project.chapters.length + 1} 章` }) });
     state.project.chapters.push(chapter);
+    state.chapterBulkMode = false;
+    state.selectedChapterIds.clear();
     renderChapterOptions();
     selectChapter(chapter.id);
     $("#chapterTitleInput").select();
@@ -655,6 +678,9 @@ function openChapterLinkDialog() {
 
 function startChapterLinkMode() {
   if (!state.selectedNodeId) return;
+  state.chapterBulkMode = false;
+  state.selectedChapterIds.clear();
+  renderChapters();
   state.linkTargetNodeId = state.selectedNodeId;
   $(".chapter-panel").classList.add("link-target-mode");
   toast("请从左侧作品目录选择要链接的章节");
@@ -1163,10 +1189,26 @@ function bindCanvasSelection() {
 function bindEvents() {
   $$(".view-button").forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
   $("#chapterList").addEventListener("click", event => {
+    const deleteButton = event.target.closest("[data-delete-chapter]");
+    if (deleteButton) { openChapterDeleteDialog([deleteButton.dataset.deleteChapter]); return; }
+    const selectInput = event.target.closest("[data-chapter-select]");
+    if (selectInput) {
+      if (selectInput.checked) state.selectedChapterIds.add(selectInput.dataset.chapterSelect);
+      else state.selectedChapterIds.delete(selectInput.dataset.chapterSelect);
+      renderChapters();
+      return;
+    }
     const sceneItem = event.target.closest(".scene-item");
+    const chapterItem = event.target.closest(".chapter-item");
+    if (state.chapterBulkMode && chapterItem) {
+      const chapterId = chapterItem.dataset.chapterId;
+      if (state.selectedChapterIds.has(chapterId)) state.selectedChapterIds.delete(chapterId);
+      else state.selectedChapterIds.add(chapterId);
+      renderChapters();
+      return;
+    }
     if (state.linkTargetNodeId) {
       const scene = sceneItem && state.project.scenes.find(item => item.id === sceneItem.dataset.sceneId);
-      const chapterItem = event.target.closest(".chapter-item");
       const chapterId = scene?.chapter_id || chapterItem?.dataset.chapterId;
       if (chapterId) { state.selectedNodeId = state.linkTargetNodeId; setNodeChapterLink(chapterId); }
       return;
@@ -1176,6 +1218,15 @@ function bindEvents() {
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
   $("#addChapterButton").addEventListener("click", addChapter);
+  $("#chapterBatchButton").addEventListener("click", toggleChapterBulkMode);
+  $("#selectAllChapters").addEventListener("change", event => {
+    const filter = $("#chapterSearch").value.trim().toLowerCase();
+    const visibleIds = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter)).map(chapter => chapter.id);
+    visibleIds.forEach(id => event.currentTarget.checked ? state.selectedChapterIds.add(id) : state.selectedChapterIds.delete(id));
+    renderChapters();
+  });
+  $("#deleteSelectedChaptersButton").addEventListener("click", () => openChapterDeleteDialog([...state.selectedChapterIds]));
+  $("#confirmChapterDeleteButton").addEventListener("click", deletePendingChapters);
   $("#chapterTitleInput").addEventListener("input", queueDocumentSave);
   $("#chapterContent").addEventListener("input", queueDocumentSave);
   $$(".format-tools button").forEach(button => button.addEventListener("click", () => {
@@ -1356,6 +1407,80 @@ async function createProject() {
     const project = await api("/api/projects", { method: "POST", body: JSON.stringify({ title, description: "" }) });
     state.projects.unshift(project); input.value = ""; $("#projectDialog").close(); await loadProject(project.id); toast("新作品已创建");
   } catch (error) { toast(error.message); }
+}
+
+function toggleChapterBulkMode() {
+  if (state.linkTargetNodeId) { toast("请先完成或取消章节链接"); return; }
+  if (!state.chapterBulkMode && state.project.chapters.length <= 1) { toast("作品至少需要保留一个章节"); return; }
+  state.chapterBulkMode = !state.chapterBulkMode;
+  state.selectedChapterIds.clear();
+  renderChapters();
+}
+
+function openChapterDeleteDialog(chapterIds) {
+  if (!state.project) return;
+  if (state.linkTargetNodeId) { toast("请先完成或取消章节链接"); return; }
+  const ids = [...new Set(chapterIds)].filter(id => state.project.chapters.some(chapter => chapter.id === id));
+  if (!ids.length) return;
+  if (state.project.chapters.length - ids.length < 1) { toast("作品至少需要保留一个章节"); return; }
+  const deleted = new Set(ids);
+  const chapters = state.project.chapters.filter(chapter => deleted.has(chapter.id));
+  const sceneCount = state.project.scenes.filter(scene => deleted.has(scene.chapter_id)).length;
+  const nodeLinkCount = state.project.nodes.filter(node => deleted.has(node.chapter_id)).length;
+  const edgeLinkCount = state.project.edges.filter(edge => deleted.has(edge.chapter_id)).length;
+  state.pendingChapterDeleteIds = ids;
+  $("#chapterDeleteTitle").textContent = ids.length === 1 ? "确认删除章节？" : `确认删除 ${ids.length} 个章节？`;
+  $("#chapterDeleteSummary").textContent = ids.length === 1 ? `将删除“${chapters[0].title}”。` : `将批量删除选中的 ${ids.length} 个章节。`;
+  $("#chapterDeleteDetails").textContent = `同时删除 ${sceneCount} 个所属场景；${nodeLinkCount} 个节点链接和 ${edgeLinkCount} 个箭头链接会自动断开。`;
+  $("#chapterDeleteDialog").showModal();
+}
+
+async function deletePendingChapters() {
+  const ids = [...state.pendingChapterDeleteIds];
+  if (!state.project || !ids.length) return;
+  const deletingActiveDocument = ids.includes(state.activeChapterId);
+  if (deletingActiveDocument) clearTimeout(state.chapterTimer);
+  const button = $("#confirmChapterDeleteButton");
+  button.disabled = true;
+  button.textContent = "正在删除…";
+  try {
+    const result = await api(`/api/projects/${state.project.id}/chapters/bulk-delete`, {
+      method: "POST",
+      body: JSON.stringify({ chapter_ids: ids }),
+    });
+    const deleted = new Set(ids);
+    const deletedSceneIds = new Set(state.project.scenes.filter(scene => deleted.has(scene.chapter_id)).map(scene => scene.id));
+    state.project.chapters = state.project.chapters.filter(chapter => !deleted.has(chapter.id));
+    state.project.chapters.forEach((chapter, position) => { chapter.position = position; });
+    state.project.scenes = state.project.scenes.filter(scene => !deleted.has(scene.chapter_id));
+    state.project.nodes.forEach(node => {
+      if (deleted.has(node.chapter_id)) node.chapter_id = null;
+      if (deletedSceneIds.has(node.scene_id)) node.scene_id = null;
+    });
+    state.project.edges.forEach(edge => { if (deleted.has(edge.chapter_id)) edge.chapter_id = null; });
+    if (deleted.has(state.activeChapterId)) {
+      state.activeChapterId = state.project.chapters[0].id;
+      state.activeSceneId = null;
+      localStorage.setItem("motu.activeChapterId", state.activeChapterId);
+      localStorage.removeItem("motu.activeSceneId");
+    } else if (deletedSceneIds.has(state.activeSceneId)) {
+      state.activeSceneId = null;
+      localStorage.removeItem("motu.activeSceneId");
+    }
+    state.chapterBulkMode = false;
+    state.selectedChapterIds.clear();
+    state.pendingChapterDeleteIds = [];
+    $("#chapterDeleteDialog").close();
+    $(".inspector").classList.add("hidden");
+    renderAll();
+    toast(`已删除 ${result.chapters} 个章节和 ${result.scenes} 个场景`);
+  } catch (error) {
+    if (deletingActiveDocument) queueDocumentSave();
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "确认删除";
+  }
 }
 
 function openClearCanvasDialog() {

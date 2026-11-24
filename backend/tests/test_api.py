@@ -144,6 +144,50 @@ class ApiFlowTest(unittest.TestCase):
         self.assertTrue({"chapter_id", "line_style", "color", "source_port", "target_port"}.issubset(edge_columns))
         self.assertIsNotNone(scene_table)
 
+    def test_bulk_delete_chapters_keeps_one_and_detaches_map_links(self):
+        project = self.client.post("/api/projects", json={"title": "Delete chapters", "description": ""}).json()
+        first = project["chapters"][0]
+        second = self.client.post(
+            f"/api/projects/{project['id']}/chapters", json={"title": "Second"}
+        ).json()
+        third = self.client.post(
+            f"/api/projects/{project['id']}/chapters", json={"title": "Third"}
+        ).json()
+        scene = self.client.post(
+            f"/api/chapters/{second['id']}/scenes", json={"title": "Deleted scene"}
+        )
+        self.assertEqual(scene.status_code, 201)
+        source = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "Source", "chapter_id": second["id"]},
+        ).json()
+        target = self.client.post(
+            f"/api/projects/{project['id']}/nodes", json={"label": "Target"}
+        ).json()
+        edge = self.client.post(
+            f"/api/projects/{project['id']}/edges",
+            json={"source_id": source["id"], "target_id": target["id"], "chapter_id": second["id"]},
+        )
+        self.assertEqual(edge.status_code, 201)
+
+        deleted = self.client.post(
+            f"/api/projects/{project['id']}/chapters/bulk-delete",
+            json={"chapter_ids": [second["id"], third["id"]]},
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json(), {"chapters": 2, "scenes": 1})
+        remaining = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual([chapter["id"] for chapter in remaining["chapters"]], [first["id"]])
+        self.assertEqual(remaining["scenes"], [])
+        self.assertIsNone(next(node for node in remaining["nodes"] if node["id"] == source["id"])["chapter_id"])
+        self.assertIsNone(remaining["edges"][0]["chapter_id"])
+
+        refused = self.client.post(
+            f"/api/projects/{project['id']}/chapters/bulk-delete",
+            json={"chapter_ids": [first["id"]]},
+        )
+        self.assertEqual(refused.status_code, 409)
+
     def test_api_key_protects_writing_data(self):
         main.API_KEY = "test-secret"
         denied = self.client.get("/api/projects")

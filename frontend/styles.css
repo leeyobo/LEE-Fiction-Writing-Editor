@@ -52,22 +52,42 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chapter-panel.link-target-mode::before { content: "请选择要链接的章节"; margin: -12px 0 12px; padding: 8px 10px; border-radius: 8px; color: white; background: #2563eb; text-align: center; font-size: 12px; font-weight: 700; }
 .chapter-panel.link-target-mode .chapter-item { outline: 1px dashed #87afe8; }
 .panel-title-row, .inspector-heading, .modal-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.panel-title-actions { display: flex; align-items: center; gap: 7px; }
+.chapter-batch-button { height: 34px; padding: 0 10px; border: 1px solid #cbdcf3; border-radius: 9px; color: #315b94; background: white; cursor: pointer; font-size: 12px; }
+.chapter-batch-button:hover, .chapter-batch-button.active { color: white; border-color: #2563eb; background: #2563eb; }
+.chapter-batch-button:disabled { color: #7890ae; border-color: #d9e3ef; background: white; opacity: .42; cursor: not-allowed; }
 .eyebrow { margin: 0 0 5px; color: #6f8fbe; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
 h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .add-button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: var(--accent); color: white; box-shadow: 0 8px 18px rgba(37,99,235,.2); font-size: 20px; cursor: pointer; }
 .search-box { display: flex; align-items: center; gap: 7px; margin: 22px 0 18px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--muted); }
 .search-box input { width: 100%; height: 38px; border: 0; outline: 0; background: transparent; }
+.chapter-batch-bar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin: -7px 0 14px; padding: 9px 10px; border: 1px solid #cbdcf3; border-radius: 10px; color: #60738e; background: #edf5ff; font-size: 11px; }
+.chapter-batch-bar[hidden] { display: none; }
+.chapter-batch-bar label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.chapter-batch-bar input { accent-color: #2563eb; }
+.chapter-batch-bar button { padding: 6px 8px; border: 1px solid #efb8c0; border-radius: 7px; color: #b63245; background: #fff8f9; cursor: pointer; font-size: 11px; }
+.chapter-batch-bar button:disabled { opacity: .45; cursor: not-allowed; }
 .volume-label { display: flex; justify-content: space-between; padding: 0 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .chapter-list { list-style: none; padding: 0; margin: 0; overflow: auto; }
 .chapter-group { list-style: none; margin: 0 0 4px; }
 .chapter-item { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; min-height: 56px; margin-bottom: 4px; padding: 7px 9px; border-radius: 11px; cursor: pointer; }
+.chapter-item.bulk-select { grid-template-columns: 18px 30px 1fr 42px; }
 .chapter-item:hover { background: var(--soft); }
 .chapter-item.active { background: #e6f0ff; color: #123b78; }
+.chapter-group.selected-for-delete .chapter-item { box-shadow: inset 0 0 0 1px #f0aeb8; background: #fff4f5; }
+.chapter-select { width: 15px; height: 15px; margin: 0; accent-color: #c43e50; cursor: pointer; }
 .chapter-number { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: white; color: var(--muted); font-size: 12px; font-weight: 700; }
 .chapter-item.active .chapter-number { background: var(--accent); color: white; }
 .chapter-copy { min-width: 0; }
 .chapter-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .chapter-copy small, .chapter-words { color: var(--muted); font-size: 11px; }
+.chapter-trailing { position: relative; display: grid; place-items: center end; width: 42px; min-height: 30px; }
+.chapter-delete-button { position: absolute; right: 0; padding: 5px 6px; border: 1px solid #efb8c0; border-radius: 7px; color: #bd3548; background: #fff8f9; opacity: 0; pointer-events: none; cursor: pointer; font-size: 11px; transition: opacity .14s ease; }
+.chapter-item:not(.bulk-select):hover .chapter-words, .chapter-item:not(.bulk-select):focus-within .chapter-words { opacity: 0; }
+.chapter-item:not(.bulk-select):hover .chapter-delete-button, .chapter-item:not(.bulk-select):focus-within .chapter-delete-button { opacity: 1; pointer-events: auto; }
+.chapter-delete-button:disabled { opacity: .42 !important; cursor: not-allowed; }
+.chapter-item.bulk-select .chapter-delete-button { display: none; }
+.chapter-panel.bulk-mode .scene-list { display: none; }
 .scene-list { list-style: none; margin: 0 0 8px 24px; padding: 0 0 0 13px; border-left: 1px solid #cdddf2; }
 .scene-item { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 7px; min-height: 38px; padding: 5px 8px; border-radius: 9px; color: #536783; cursor: pointer; }
 .scene-item:hover { background: #edf5ff; }
@@ -362,6 +382,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
   .chapter-panel, .view-panel { position: absolute; inset: 0; }
   .chapter-panel { display: none; width: 100%; border: 0; }
   .chapter-panel.mobile-active { display: flex; }
+  .chapter-item:not(.bulk-select) .chapter-words { opacity: 0; }
+  .chapter-item:not(.bulk-select) .chapter-delete-button { opacity: 1; pointer-events: auto; }
   .view-panel.active { display: none; }
   .view-panel.mobile-active { display: flex; }
   .editor-toolbar { height: 45px; flex-basis: 45px; padding: 0 12px; }
