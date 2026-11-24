@@ -117,8 +117,22 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .linked-node-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 5px 10px; border: 1px solid #cbdcf4; border-radius: 999px; color: #1d4ed8; background: #f5f9ff; cursor: pointer; font-size: 12px; }
 .linked-node-pill:hover { border-color: #8db4ed; background: #eaf3ff; }
 .linked-node-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.manuscript { min-height: calc(100dvh - 390px); resize: none; overflow: hidden; border: 0; outline: 0; padding: 38px 0; color: #292b39; background: transparent; font: 400 18px/2.05 "Noto Serif SC", "Songti SC", serif; letter-spacing: .04em; caret-color: var(--accent); }
-.manuscript::placeholder { color: #c0c2cb; }
+.manuscript { min-height: calc(100dvh - 390px); overflow-wrap: anywhere; border: 0; outline: 0; padding: 38px 0; color: #292b39; background: transparent; font: 400 18px/2.05 "Noto Serif SC", "Songti SC", serif; letter-spacing: .04em; caret-color: var(--accent); }
+.manuscript:empty::before { content: attr(data-placeholder); color: #a8abb4; pointer-events: none; }
+.manuscript p { margin: 0 0 1.15em; }
+.manuscript h1, .manuscript h2, .manuscript h3, .manuscript h4, .manuscript h5, .manuscript h6 { margin: 1.2em 0 .55em; color: #17223a; line-height: 1.45; }
+.manuscript h1 { font-size: 1.8em; } .manuscript h2 { font-size: 1.55em; } .manuscript h3 { font-size: 1.32em; } .manuscript h4 { font-size: 1.16em; }
+.manuscript blockquote { margin: 1.2em 0; padding: .4em 1.1em; border-left: 4px solid #9db3d1; color: #596a82; background: rgba(87,110,143,.055); }
+.manuscript ul, .manuscript ol { margin: .8em 0 1.2em; padding-left: 1.8em; }
+.manuscript code { padding: .14em .34em; border-radius: 5px; color: #9f3850; background: rgba(115,128,148,.12); font: .88em/1.5 Consolas,"SFMono-Regular",monospace; letter-spacing: 0; }
+.manuscript pre { margin: 1.2em 0; padding: 16px 18px; overflow: auto; border: 1px solid rgba(105,119,139,.18); border-radius: 10px; color: #27364d; background: rgba(228,231,235,.72); font: 14px/1.7 Consolas,"SFMono-Regular",monospace; letter-spacing: 0; white-space: pre-wrap; }
+.manuscript pre code { padding: 0; color: inherit; background: transparent; font: inherit; }
+.manuscript .math-block { color: #475569; text-align: center; }
+.manuscript a { color: #2563eb; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.manuscript img { display: block; max-width: 100%; height: auto; margin: 1.2em auto; border-radius: 9px; }
+.manuscript table { width: 100%; margin: 1.2em 0; border-collapse: collapse; background: rgba(255,255,255,.45); font-family: Inter,"Microsoft YaHei",sans-serif; font-size: 15px; letter-spacing: 0; }
+.manuscript th, .manuscript td { padding: 9px 11px; border: 1px solid #cfd6df; text-align: left; }
+.manuscript th { background: rgba(222,226,232,.7); }
 .shortcut-panel { position: fixed; z-index: 60; top: 132px; right: 24px; width: min(430px,calc(100vw - 48px)); max-height: min(680px,calc(100dvh - 156px)); overflow: hidden; border: 1px solid #cdddf2; border-radius: 16px; background: rgba(255,255,255,.98); box-shadow: 0 24px 70px rgba(27,57,105,.22); }
 .shortcut-panel[hidden] { display: none; }
 .shortcut-panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 12px; }

@@ -111,108 +111,244 @@ function wordCount(text = "") {
   return chinese + latin;
 }
 
+function markdownPlainText(text = "") {
+  return String(text)
+    .replace(/```[\s\S]*?```/g, "代码片段")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/<\/?u>/g, "")
+    .replace(/(?:\*\*|~~|`|\*)/g, "")
+    .replace(/^\s*(?:#{1,6}|>|[-+*]|\d+\.)\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function resizeManuscript() {
   const editor = $("#chapterContent");
   if (!editor) return;
-  editor.style.height = "auto";
-  editor.style.height = `${Math.max(editor.scrollHeight, 640)}px`;
+  editor.style.minHeight = `${Math.max(editor.scrollHeight, 640)}px`;
 }
 
-function replaceMarkdownSelection(text, selectionOffset = null, selectionLength = 0) {
-  const editor = $("#chapterContent");
-  const start = editor.selectionStart;
-  const end = editor.selectionEnd;
-  editor.setRangeText(text, start, end, "end");
-  if (selectionOffset !== null) {
-    editor.setSelectionRange(start + selectionOffset, start + selectionOffset + selectionLength);
+function safeMarkdownUrl(value) {
+  const url = String(value || "").trim();
+  return /^(?:https?:|mailto:|#|\/|\.\.?\/)/i.test(url) ? escapeHtml(url) : "#";
+}
+
+function inlineMarkdownToHtml(value = "") {
+  const tokens = [];
+  const stash = html => {
+    const key = `\uE000${tokens.length}\uE001`;
+    tokens.push(html);
+    return key;
+  };
+  let html = escapeHtml(value);
+  html = html.replace(/`([^`\n]+)`/g, (_, content) => stash(`<code>${content}</code>`));
+  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, url) => stash(`<img src="${safeMarkdownUrl(url)}" alt="${alt}" />`));
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => stash(`<a href="${safeMarkdownUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`));
+  html = html.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, (_, content) => stash(`<u>${content}</u>`));
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+  tokens.forEach((token, index) => { html = html.split(`\uE000${index}\uE001`).join(token); });
+  return html;
+}
+
+function markdownToEditorHtml(markdown = "") {
+  const lines = String(markdown).replace(/\r\n?/g, "\n").split("\n");
+  const output = [];
+  const cells = line => line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (!line.trim()) { index += 1; continue; }
+    const fence = line.match(/^```\s*([^\s]*)/);
+    if (fence) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index])) code.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      output.push(`<pre data-language="${escapeHtml(fence[1] || "")}"><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    if (line.trim() === "$$") {
+      const math = [];
+      index += 1;
+      while (index < lines.length && lines[index].trim() !== "$$") math.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      output.push(`<pre class="math-block">${escapeHtml(`$$\n${math.join("\n")}\n$$`)}</pre>`);
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      output.push(`<h${level}>${inlineMarkdownToHtml(heading[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      const quoted = [];
+      while (index < lines.length && /^>\s?/.test(lines[index])) quoted.push(lines[index++].replace(/^>\s?/, ""));
+      output.push(`<blockquote>${quoted.map(inlineMarkdownToHtml).join("<br>")}</blockquote>`);
+      continue;
+    }
+    if (/^[-+*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^[-+*]\s+/.test(lines[index])) items.push(lines[index++].replace(/^[-+*]\s+/, ""));
+      output.push(`<ul>${items.map(item => `<li>${inlineMarkdownToHtml(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index])) items.push(lines[index++].replace(/^\d+\.\s+/, ""));
+      output.push(`<ol>${items.map(item => `<li>${inlineMarkdownToHtml(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+    if (line.includes("|") && index + 1 < lines.length && /^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$/.test(lines[index + 1])) {
+      const headers = cells(line);
+      index += 2;
+      const rows = [];
+      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) rows.push(cells(lines[index++]));
+      output.push(`<table><thead><tr>${headers.map(cell => `<th>${inlineMarkdownToHtml(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${inlineMarkdownToHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    output.push(`<p>${inlineMarkdownToHtml(line)}</p>`);
+    index += 1;
   }
+  return output.join("");
+}
+
+function inlineEditorNodeToMarkdown(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue.replace(/\u00a0/g, " ");
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const tag = node.tagName.toLowerCase();
+  const content = [...node.childNodes].map(inlineEditorNodeToMarkdown).join("");
+  if (tag === "strong" || tag === "b") return `**${content}**`;
+  if (tag === "em" || tag === "i") return `*${content}*`;
+  if (tag === "u") return `<u>${content}</u>`;
+  if (tag === "del" || tag === "s" || tag === "strike") return `~~${content}~~`;
+  if (tag === "code") return `\`${content}\``;
+  if (tag === "a") return `[${content}](${node.getAttribute("href") || "#"})`;
+  if (tag === "img") return `![${node.getAttribute("alt") || "图片"}](${node.getAttribute("src") || ""})`;
+  if (tag === "br") return "  \n";
+  return content;
+}
+
+function editorBlockToMarkdown(node) {
+  if (node.nodeType === Node.TEXT_NODE) return inlineEditorNodeToMarkdown(node);
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const tag = node.tagName.toLowerCase();
+  const inline = () => [...node.childNodes].map(inlineEditorNodeToMarkdown).join("").trimEnd();
+  if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${inline()}`;
+  if (tag === "p" || tag === "div") return inline();
+  if (tag === "blockquote") return inline().split("\n").map(line => `> ${line}`).join("\n");
+  if (tag === "ul" || tag === "ol") return [...node.children].filter(child => child.tagName.toLowerCase() === "li").map((item, index) => `${tag === "ol" ? `${index + 1}.` : "-"} ${[...item.childNodes].map(inlineEditorNodeToMarkdown).join("")}`).join("\n");
+  if (tag === "pre") {
+    if (node.classList.contains("math-block")) return node.textContent;
+    const language = node.dataset.language || "";
+    return `\`\`\`${language}\n${node.textContent}\n\`\`\``;
+  }
+  if (tag === "table") {
+    const rows = [...node.querySelectorAll("tr")].map(row => [...row.children].map(cell => cell.textContent.trim()));
+    if (!rows.length) return "";
+    return [`| ${rows[0].join(" | ")} |`, `| ${rows[0].map(() => "---").join(" | ")} |`, ...rows.slice(1).map(row => `| ${row.join(" | ")} |`)].join("\n");
+  }
+  if (tag === "br") return "";
+  return inline();
+}
+
+function editorToMarkdown() {
+  const editor = $("#chapterContent");
+  return [...editor.childNodes].map(editorBlockToMarkdown).join("\n\n").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+function editorSelection() {
+  const editor = $("#chapterContent");
+  const selection = window.getSelection();
+  if (!selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  return editor.contains(range.commonAncestorContainer) ? { editor, selection, range } : null;
+}
+
+function insertRichHtml(html) {
+  const editor = $("#chapterContent");
   editor.focus();
+  let current = editorSelection();
+  if (!current) {
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    current = { editor, selection, range };
+  }
+  current.range.deleteContents();
+  const fragment = current.range.createContextualFragment(html);
+  const lastNode = fragment.lastChild;
+  current.range.insertNode(fragment);
+  if (lastNode) {
+    current.range.setStartAfter(lastNode);
+    current.range.collapse(true);
+    current.selection.removeAllRanges();
+    current.selection.addRange(current.range);
+  }
+}
+
+function wrapRichSelection(tag, placeholder) {
+  const current = editorSelection();
+  if (!current || current.range.collapsed) {
+    insertRichHtml(`<${tag}>${escapeHtml(placeholder)}</${tag}>`);
+    return;
+  }
+  const wrapper = document.createElement(tag);
+  wrapper.appendChild(current.range.extractContents());
+  current.range.insertNode(wrapper);
+  current.range.selectNodeContents(wrapper);
+  current.selection.removeAllRanges();
+  current.selection.addRange(current.range);
+}
+
+function syncRichEditorChange() {
   resizeManuscript();
   queueDocumentSave();
-}
-
-function wrapMarkdownSelection(prefix, suffix, placeholder) {
-  const editor = $("#chapterContent");
-  const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd);
-  const content = selected || placeholder;
-  replaceMarkdownSelection(`${prefix}${content}${suffix}`, prefix.length, content.length);
-}
-
-function transformMarkdownLines(transform) {
-  const editor = $("#chapterContent");
-  const value = editor.value;
-  const selectionStart = editor.selectionStart;
-  const selectionEnd = editor.selectionEnd;
-  const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
-  const nextBreak = value.indexOf("\n", selectionEnd);
-  const blockEnd = nextBreak === -1 ? value.length : nextBreak;
-  const original = value.slice(blockStart, blockEnd);
-  const replacement = transform(original.split("\n")).join("\n");
-  editor.setSelectionRange(blockStart, blockEnd);
-  editor.setRangeText(replacement, blockStart, blockEnd, "select");
-  editor.focus();
-  resizeManuscript();
-  queueDocumentSave();
-}
-
-function stripMarkdownBlockPrefix(line) {
-  return line.replace(/^(?:#{1,6}\s+|>\s+|[-+*]\s+|\d+\.\s+)/, "");
-}
-
-function selectCurrentLine() {
-  const editor = $("#chapterContent");
-  const start = editor.value.lastIndexOf("\n", Math.max(0, editor.selectionStart - 1)) + 1;
-  const nextBreak = editor.value.indexOf("\n", editor.selectionEnd);
-  editor.setSelectionRange(start, nextBreak === -1 ? editor.value.length : nextBreak);
-}
-
-function selectCurrentWord() {
-  const editor = $("#chapterContent");
-  if (editor.selectionStart !== editor.selectionEnd) return;
-  const isWord = character => Boolean(character && /[\p{L}\p{N}_-]/u.test(character));
-  let start = editor.selectionStart;
-  let end = editor.selectionEnd;
-  while (start > 0 && isWord(editor.value[start - 1])) start -= 1;
-  while (end < editor.value.length && isWord(editor.value[end])) end += 1;
-  editor.setSelectionRange(start, end);
 }
 
 function applyMarkdownAction(action) {
   const editor = $("#chapterContent");
   if (!editor || !activeDocument()) return;
-  if (action === "bold") wrapMarkdownSelection("**", "**", "粗体文字");
-  else if (action === "italic") wrapMarkdownSelection("*", "*", "斜体文字");
-  else if (action === "underline") wrapMarkdownSelection("<u>", "</u>", "下划线文字");
-  else if (action === "strike") wrapMarkdownSelection("~~", "~~", "删除线文字");
-  else if (action === "inlineCode") wrapMarkdownSelection("`", "`", "代码");
+  editor.focus();
+  const current = editorSelection();
+  const selectedText = current?.selection.toString() || "";
+  if (action === "bold") selectedText ? document.execCommand("bold") : wrapRichSelection("strong", "粗体文字");
+  else if (action === "italic") selectedText ? document.execCommand("italic") : wrapRichSelection("em", "斜体文字");
+  else if (action === "underline") selectedText ? document.execCommand("underline") : wrapRichSelection("u", "下划线文字");
+  else if (action === "strike") selectedText ? document.execCommand("strikeThrough") : wrapRichSelection("del", "删除线文字");
+  else if (action === "inlineCode") wrapRichSelection("code", "代码");
   else if (action === "link") {
-    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "链接文字";
-    const text = `[${selected}](https://)`;
-    replaceMarkdownSelection(text, selected.length + 3, 8);
+    const url = window.prompt("请输入链接地址", "https://");
+    if (url) selectedText ? document.execCommand("createLink", false, url) : insertRichHtml(`<a href="${safeMarkdownUrl(url)}">链接文字</a>`);
   } else if (action === "image") {
-    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "图片说明";
-    const text = `![${selected}](图片地址)`;
-    replaceMarkdownSelection(text, selected.length + 4, 4);
-  } else if (/^heading[1-6]$/.test(action)) {
-    const level = Number(action.slice(-1));
-    transformMarkdownLines(lines => lines.map(line => `${"#".repeat(level)} ${stripMarkdownBlockPrefix(line)}`));
-  } else if (action === "paragraph") transformMarkdownLines(lines => lines.map(stripMarkdownBlockPrefix));
-  else if (action === "quote") transformMarkdownLines(lines => lines.map(line => `> ${stripMarkdownBlockPrefix(line)}`));
-  else if (action === "unorderedList") transformMarkdownLines(lines => lines.map(line => `- ${stripMarkdownBlockPrefix(line)}`));
-  else if (action === "orderedList") transformMarkdownLines(lines => lines.map((line, index) => `${index + 1}. ${stripMarkdownBlockPrefix(line)}`));
-  else if (action === "indent") transformMarkdownLines(lines => lines.map(line => `  ${line}`));
-  else if (action === "outdent") transformMarkdownLines(lines => lines.map(line => line.replace(/^(?: {1,2}|\t)/, "")));
-  else if (action === "codeFence") {
-    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "代码";
-    replaceMarkdownSelection(`\`\`\`\n${selected}\n\`\`\``, 4, selected.length);
-  } else if (action === "mathBlock") {
-    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "公式";
-    replaceMarkdownSelection(`$$\n${selected}\n$$`, 3, selected.length);
-  } else if (action === "table") {
-    replaceMarkdownSelection("| 列 1 | 列 2 |\n| --- | --- |\n| 内容 | 内容 |", 2, 3);
-  } else if (action === "selectLine") selectCurrentLine();
-  else if (action === "selectWord") selectCurrentWord();
-  else if (action === "save") { queueDocumentSave(); toast("正在保存章节"); }
+    const url = window.prompt("请输入图片地址", "https://");
+    if (url) insertRichHtml(`<img src="${safeMarkdownUrl(url)}" alt="${escapeHtml(selectedText || "图片说明")}" />`);
+  } else if (/^heading[1-6]$/.test(action)) document.execCommand("formatBlock", false, `h${action.slice(-1)}`);
+  else if (action === "paragraph") document.execCommand("formatBlock", false, "p");
+  else if (action === "quote") document.execCommand("formatBlock", false, "blockquote");
+  else if (action === "unorderedList") document.execCommand("insertUnorderedList");
+  else if (action === "orderedList") document.execCommand("insertOrderedList");
+  else if (action === "indent") document.execCommand("indent");
+  else if (action === "outdent") document.execCommand("outdent");
+  else if (action === "codeFence") insertRichHtml(`<pre><code>${escapeHtml(selectedText || "代码")}</code></pre><p><br></p>`);
+  else if (action === "mathBlock") insertRichHtml(`<pre class="math-block">${escapeHtml(`$$\n${selectedText || "公式"}\n$$`)}</pre><p><br></p>`);
+  else if (action === "table") insertRichHtml("<table><thead><tr><th>列 1</th><th>列 2</th></tr></thead><tbody><tr><td>内容</td><td>内容</td></tr></tbody></table><p><br></p>");
+  else if (action === "selectLine" || action === "selectWord") {
+    const selection = window.getSelection();
+    if (selection.modify) {
+      selection.collapseToStart();
+      selection.modify("move", "backward", action === "selectLine" ? "lineboundary" : "word");
+      selection.modify("extend", "forward", action === "selectLine" ? "lineboundary" : "word");
+    }
+    return;
+  } else if (action === "save") { queueDocumentSave(); toast("正在保存章节"); return; }
+  syncRichEditorChange();
 }
 
 function renderShortcutGroups(query = "") {
@@ -360,7 +496,7 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
       <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
         ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
         <span class="chapter-number">${String(index).padStart(2, "0")}</span>
-        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${chapter.content ? escapeHtml(chapter.content.slice(0, 18).replace(/\s+/g, " ")) : "还没有正文"}</small></span>
+        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${chapter.content ? escapeHtml(markdownPlainText(chapter.content).slice(0, 18)) : "还没有正文"}</small></span>
         <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-delete-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
       </div>
     </li>`;
@@ -383,7 +519,7 @@ function renderEditor() {
   $("#chapterIndex").textContent = `CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
   $("#chapterSubtitle").textContent = "在安静里，把故事写下来。";
   $("#chapterTitleInput").value = chapter.title;
-  $("#chapterContent").value = chapter.content;
+  $("#chapterContent").innerHTML = markdownToEditorHtml(chapter.content);
   $("#chapterWords").textContent = `${wordCount(chapter.content)} 字`;
   renderLinkedNodes();
   requestAnimationFrame(resizeManuscript);
@@ -677,7 +813,7 @@ function queueDocumentSave() {
   const document = activeDocument();
   if (!document) return;
   document.title = $("#chapterTitleInput").value.trim() || "未命名章节";
-  document.content = $("#chapterContent").value;
+  document.content = editorToMarkdown();
   $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
   renderChapters();
   setSaveState("保存中", "saving");
@@ -1336,7 +1472,10 @@ function bindEvents() {
   $("#chapterTitleInput").addEventListener("input", queueDocumentSave);
   $("#chapterContent").addEventListener("input", () => { resizeManuscript(); queueDocumentSave(); });
   $("#chapterContent").addEventListener("keydown", handleMarkdownShortcut);
-  $$(".format-tools [data-md-action]").forEach(button => button.addEventListener("click", () => applyMarkdownAction(button.dataset.mdAction)));
+  $$(".format-tools [data-md-action]").forEach(button => {
+    button.addEventListener("pointerdown", event => event.preventDefault());
+    button.addEventListener("click", () => applyMarkdownAction(button.dataset.mdAction));
+  });
   $("#shortcutHelpButton").addEventListener("click", event => {
     event.stopPropagation();
     setShortcutPanel($("#shortcutPanel").hidden);
