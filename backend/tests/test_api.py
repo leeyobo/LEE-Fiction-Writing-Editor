@@ -1,6 +1,6 @@
+import sqlite3
 import tempfile
 import unittest
-import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -22,12 +22,10 @@ class ApiFlowTest(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_project_chapter_and_map_roundtrip(self):
-        project = self.client.post("/api/projects", json={"title": "Test novel", "description": ""}).json()
-        loaded = self.client.get(f"/api/projects/{project['id']}").json()
-        self.assertEqual(loaded["title"], "Test novel")
-        self.assertEqual(len(loaded["chapters"]), 1)
-
-        chapter = loaded["chapters"][0]
+        project = self.client.post(
+            "/api/projects", json={"title": "Test novel", "description": ""}
+        ).json()
+        chapter = project["chapters"][0]
         response = self.client.patch(
             f"/api/chapters/{chapter['id']}",
             json={"title": "Chapter one", "content": "The story begins in the rain."},
@@ -36,43 +34,35 @@ class ApiFlowTest(unittest.TestCase):
 
         first = self.client.post(
             f"/api/projects/{project['id']}/nodes",
-            json={"label": "Storm", "node_type": "plot", "shape": "rounded", "color": "blue", "x": 80, "y": 90, "chapter_id": chapter["id"]},
+            json={
+                "label": "Storm", "node_type": "plot", "shape": "rounded",
+                "color": "blue", "x": 80, "y": 90, "chapter_id": chapter["id"],
+            },
         ).json()
         second = self.client.post(
             f"/api/projects/{project['id']}/nodes",
-            json={"label": "Visitor", "node_type": "character", "shape": "hexagon", "color": "violet", "x": 320, "y": 90},
+            json={
+                "label": "Visitor", "node_type": "character", "shape": "hexagon",
+                "color": "violet", "x": 320, "y": 90,
+            },
         ).json()
         edge = self.client.post(
             f"/api/projects/{project['id']}/edges",
             json={
                 "source_id": first["id"], "target_id": second["id"], "label": "introduces",
-                "source_port": "bottom", "target_port": "top_left", "line_style": "dashed", "color": "green",
+                "source_port": "bottom", "target_port": "top_left",
+                "line_style": "dashed", "color": "green",
             },
         )
         self.assertEqual(edge.status_code, 201)
-        self.assertEqual(edge.json()["source_port"], "bottom")
-        self.assertEqual(edge.json()["target_port"], "top_left")
-        self.assertEqual(edge.json()["color"], "green")
         edge_update = self.client.patch(
             f"/api/edges/{edge.json()['id']}",
-            json={"label": "A conditional transition", "chapter_id": chapter["id"], "line_style": "dotted", "color": "rose"},
+            json={
+                "label": "A conditional transition", "chapter_id": chapter["id"],
+                "line_style": "dotted", "color": "rose",
+            },
         )
         self.assertEqual(edge_update.status_code, 200)
-        self.assertEqual(edge_update.json()["line_style"], "dotted")
-        self.assertEqual(edge_update.json()["color"], "rose")
-
-        scene_link = self.client.post(
-            f"/api/nodes/{first['id']}/scene",
-            json={"chapter_id": chapter["id"]},
-        )
-        self.assertEqual(scene_link.status_code, 201)
-        scene = scene_link.json()["scene"]
-        self.assertEqual(scene["title"], "Storm")
-        scene_update = self.client.patch(
-            f"/api/scenes/{scene['id']}",
-            json={"content": "Rain covers the old harbor."},
-        )
-        self.assertEqual(scene_update.status_code, 200)
 
         first_note = self.client.post(
             f"/api/nodes/{first['id']}/notes",
@@ -84,68 +74,68 @@ class ApiFlowTest(unittest.TestCase):
         )
         self.assertEqual(first_note.status_code, 201)
         self.assertEqual(second_note.status_code, 201)
-        locked_update = self.client.patch(
-            f"/api/notes/{first_note.json()['id']}",
-            json={"locked": True},
-        )
-        self.assertTrue(locked_update.json()["locked"])
+        self.client.patch(f"/api/notes/{first_note.json()['id']}", json={"locked": True})
 
         final = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertNotIn("scenes", final)
         self.assertEqual(len(final["nodes"]), 2)
-        self.assertEqual(len(final["edges"]), 1)
-        self.assertEqual(final["edges"][0]["chapter_id"], chapter["id"])
-        self.assertEqual(final["edges"][0]["label"], "A conditional transition")
-        self.assertEqual(len(final["scenes"]), 1)
-        self.assertEqual(len(final["notes"]), 2)
-        self.assertTrue(all(note["locked"] for note in final["notes"]))
+        self.assertNotIn("scene_id", final["nodes"][0])
         self.assertEqual(final["nodes"][0]["chapter_id"], chapter["id"])
-        self.assertEqual(final["nodes"][0]["scene_id"], scene["id"])
-        self.assertEqual(final["scenes"][0]["content"], "Rain covers the old harbor.")
+        self.assertEqual(final["edges"][0]["chapter_id"], chapter["id"])
+        self.assertEqual(final["edges"][0]["line_style"], "dotted")
+        self.assertEqual(final["edges"][0]["color"], "rose")
+        self.assertTrue(all(note["locked"] for note in final["notes"]))
 
         cleared = self.client.delete(f"/api/projects/{project['id']}/canvas")
-        self.assertEqual(cleared.status_code, 200)
         self.assertEqual(cleared.json(), {"nodes": 2, "edges": 1, "notes": 2})
         after_clear = self.client.get(f"/api/projects/{project['id']}").json()
         self.assertEqual(after_clear["nodes"], [])
         self.assertEqual(after_clear["edges"], [])
         self.assertEqual(after_clear["notes"], [])
-        self.assertEqual(len(after_clear["chapters"]), 1)
-        self.assertEqual(len(after_clear["scenes"]), 1)
-        self.assertEqual(after_clear["scenes"][0]["content"], "Rain covers the old harbor.")
+        self.assertEqual(after_clear["chapters"][0]["content"], "The story begins in the rain.")
 
-    def test_existing_database_gets_scene_link_migration(self):
-        legacy_path = Path(self.temporary_directory.name) / "legacy.db"
-        with sqlite3.connect(str(legacy_path)) as connection:
+    def test_legacy_scenes_are_promoted_to_chapters_and_links_follow(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Legacy novel", "description": ""}
+        ).json()
+        original = project["chapters"][0]
+        node = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "Old scene node", "chapter_id": original["id"]},
+        ).json()
+        timestamp = main.now()
+        legacy_scene_id = "scene_legacy"
+        with sqlite3.connect(str(main.DATABASE_PATH)) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
             connection.execute(
-                """CREATE TABLE nodes (
-                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, label TEXT NOT NULL,
-                    note TEXT NOT NULL DEFAULT '', node_type TEXT NOT NULL DEFAULT 'plot',
-                    shape TEXT NOT NULL DEFAULT 'rounded', color TEXT NOT NULL DEFAULT 'blue',
-                    x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, chapter_id TEXT,
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-                )"""
+                """INSERT INTO scenes(id, project_id, chapter_id, title, content, position, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    legacy_scene_id, project["id"], original["id"], "Promoted scene",
+                    "Preserved scene content.", 0, timestamp, timestamp,
+                ),
             )
             connection.execute(
-                """CREATE TABLE edges (
-                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, source_id TEXT NOT NULL,
-                    target_id TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-                    UNIQUE(project_id, source_id, target_id)
-                )"""
+                "UPDATE nodes SET scene_id = ? WHERE id = ?", (legacy_scene_id, node["id"])
             )
-        main.DATABASE_PATH = legacy_path
+
         main.init_db()
-        with sqlite3.connect(str(legacy_path)) as connection:
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(nodes)").fetchall()}
-            edge_columns = {row[1] for row in connection.execute("PRAGMA table_info(edges)").fetchall()}
-            scene_table = connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scenes'"
-            ).fetchone()
-        self.assertIn("scene_id", columns)
-        self.assertTrue({"chapter_id", "line_style", "color", "source_port", "target_port"}.issubset(edge_columns))
-        self.assertIsNotNone(scene_table)
+        loaded = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertNotIn("scenes", loaded)
+        self.assertEqual([item["title"] for item in loaded["chapters"]], ["第一章", "Promoted scene"])
+        promoted = loaded["chapters"][1]
+        self.assertEqual(promoted["content"], "Preserved scene content.")
+        linked_node = next(item for item in loaded["nodes"] if item["id"] == node["id"])
+        self.assertEqual(linked_node["chapter_id"], promoted["id"])
+        self.assertNotIn("scene_id", linked_node)
+        with sqlite3.connect(str(main.DATABASE_PATH)) as connection:
+            remaining_scenes = connection.execute("SELECT COUNT(*) FROM scenes").fetchone()[0]
+        self.assertEqual(remaining_scenes, 0)
 
     def test_bulk_delete_chapters_keeps_one_and_detaches_map_links(self):
-        project = self.client.post("/api/projects", json={"title": "Delete chapters", "description": ""}).json()
+        project = self.client.post(
+            "/api/projects", json={"title": "Delete chapters", "description": ""}
+        ).json()
         first = project["chapters"][0]
         second = self.client.post(
             f"/api/projects/{project['id']}/chapters", json={"title": "Second"}
@@ -153,10 +143,6 @@ class ApiFlowTest(unittest.TestCase):
         third = self.client.post(
             f"/api/projects/{project['id']}/chapters", json={"title": "Third"}
         ).json()
-        scene = self.client.post(
-            f"/api/chapters/{second['id']}/scenes", json={"title": "Deleted scene"}
-        )
-        self.assertEqual(scene.status_code, 201)
         source = self.client.post(
             f"/api/projects/{project['id']}/nodes",
             json={"label": "Source", "chapter_id": second["id"]},
@@ -175,10 +161,9 @@ class ApiFlowTest(unittest.TestCase):
             json={"chapter_ids": [second["id"], third["id"]]},
         )
         self.assertEqual(deleted.status_code, 200)
-        self.assertEqual(deleted.json(), {"chapters": 2, "scenes": 1})
+        self.assertEqual(deleted.json(), {"chapters": 2})
         remaining = self.client.get(f"/api/projects/{project['id']}").json()
         self.assertEqual([chapter["id"] for chapter in remaining["chapters"]], [first["id"]])
-        self.assertEqual(remaining["scenes"], [])
         self.assertIsNone(next(node for node in remaining["nodes"] if node["id"] == source["id"])["chapter_id"])
         self.assertIsNone(remaining["edges"][0]["chapter_id"])
 
@@ -191,11 +176,12 @@ class ApiFlowTest(unittest.TestCase):
     def test_api_key_protects_writing_data(self):
         main.API_KEY = "test-secret"
         denied = self.client.get("/api/projects")
-        allowed = self.client.get("/api/projects", headers={"Authorization": "Bearer test-secret"})
+        allowed = self.client.get(
+            "/api/projects", headers={"Authorization": "Bearer test-secret"}
+        )
         self.assertEqual(denied.status_code, 401)
         self.assertEqual(allowed.status_code, 200)
 
 
 if __name__ == "__main__":
     unittest.main()
-

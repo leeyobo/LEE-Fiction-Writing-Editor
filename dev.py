@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED_API_VERSION = "0.7.0"
+EXPECTED_API_VERSION = "0.8.0"
 
 
 def port_is_open(port: int) -> bool:

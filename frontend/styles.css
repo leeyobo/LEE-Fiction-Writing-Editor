@@ -87,14 +87,6 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .chapter-item:not(.bulk-select):hover .chapter-delete-button, .chapter-item:not(.bulk-select):focus-within .chapter-delete-button { opacity: 1; pointer-events: auto; }
 .chapter-delete-button:disabled { opacity: .42 !important; cursor: not-allowed; }
 .chapter-item.bulk-select .chapter-delete-button { display: none; }
-.chapter-panel.bulk-mode .scene-list { display: none; }
-.scene-list { list-style: none; margin: 0 0 8px 24px; padding: 0 0 0 13px; border-left: 1px solid #cdddf2; }
-.scene-item { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 7px; min-height: 38px; padding: 5px 8px; border-radius: 9px; color: #536783; cursor: pointer; }
-.scene-item:hover { background: #edf5ff; }
-.scene-item.active { color: #164a9b; background: #dfecff; font-weight: 600; }
-.scene-glyph { color: #3b82f6; font-size: 15px; }
-.scene-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.scene-words { color: #8292aa; font-size: 10px; }
 .sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; padding: 16px 10px 0; border-top: 1px solid var(--line); }
 .sidebar-footer div:last-child { display: grid; gap: 2px; }
 .progress-ring { display: grid; place-items: center; width: 43px; height: 43px; border-radius: 50%; background: conic-gradient(var(--accent) 33%, #e5e7ef 0); position: relative; }
@@ -288,11 +280,6 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .wide-button, .danger-button { width: 100%; border-radius: 9px; padding: 10px; cursor: pointer; }
 .wide-button { border: 0; color: white; background: var(--accent); }
 .wide-button:disabled { opacity: .45; cursor: not-allowed; }
-.scene-link-status { margin: -5px 0 17px; padding: 9px 10px; border: 1px solid #d7e5f8; border-radius: 9px; color: #617590; background: #f6faff; font-size: 11px; line-height: 1.5; }
-.scene-link-status.linked { color: #1755aa; border-color: #b9d2f5; background: #eaf3ff; }
-.scene-create-button { width: 100%; margin-bottom: 8px; padding: 10px; border: 1px solid #b9d2f5; border-radius: 9px; color: #1d4ed8; background: #eff6ff; cursor: pointer; font-weight: 600; }
-.scene-create-button:hover { background: #e1edff; }
-.scene-create-button[hidden] { display: none; }
 .danger-button { margin-top: 8px; border: 1px solid #f0cdd1; color: #c64e5b; background: #fff; }
 
 .modal { width: min(520px, calc(100% - 32px)); border: 0; border-radius: 18px; padding: 0; color: var(--ink); box-shadow: 0 30px 90px rgba(20,22,40,.24); }

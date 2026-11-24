@@ -9,7 +9,6 @@ const state = {
   projects: [],
   project: null,
   activeChapterId: localStorage.getItem("motu.activeChapterId") || null,
-  activeSceneId: localStorage.getItem("motu.activeSceneId") || null,
   selectedNodeId: null,
   selectedNodeIds: new Set(),
   selectedEdgeId: null,
@@ -94,12 +93,8 @@ function activeChapter() {
   return state.project?.chapters.find(chapter => chapter.id === state.activeChapterId) || null;
 }
 
-function activeScene() {
-  return state.project?.scenes?.find(scene => scene.id === state.activeSceneId) || null;
-}
-
 function activeDocument() {
-  return activeScene() || activeChapter();
+  return activeChapter();
 }
 
 async function boot() {
@@ -134,15 +129,10 @@ async function connect() {
 async function loadProject(projectId) {
   setSaveState("正在载入", "saving");
   state.project = await api(`/api/projects/${projectId}`);
-  state.project.scenes ||= [];
   state.project.notes ||= [];
   localStorage.setItem("motu.projectId", projectId);
   if (!state.project.chapters.some(chapter => chapter.id === state.activeChapterId)) {
     state.activeChapterId = state.project.chapters[0]?.id || null;
-  }
-  if (!state.project.scenes.some(scene => scene.id === state.activeSceneId && scene.chapter_id === state.activeChapterId)) {
-    state.activeSceneId = null;
-    localStorage.removeItem("motu.activeSceneId");
   }
   state.selectedNodeId = null;
   state.selectedNodeIds.clear();
@@ -171,8 +161,7 @@ function renderAll() {
 }
 
 function chapterMatchesFilter(chapter, filter) {
-  const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
-  return chapter.title.toLowerCase().includes(filter) || scenes.some(scene => scene.title.toLowerCase().includes(filter));
+  return chapter.title.toLowerCase().includes(filter);
 }
 
 function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase()) {
@@ -185,16 +174,14 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
   const chapters = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter));
   $("#chapterList").innerHTML = chapters.map(chapter => {
     const index = state.project.chapters.indexOf(chapter) + 1;
-    const scenes = state.project.scenes.filter(scene => scene.chapter_id === chapter.id);
     const checked = state.selectedChapterIds.has(chapter.id);
     return `<li class="chapter-group ${checked ? "selected-for-delete" : ""}">
-      <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${chapter.id === state.activeChapterId && !state.activeSceneId ? "active" : ""}" data-chapter-id="${chapter.id}">
+      <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
         ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
         <span class="chapter-number">${String(index).padStart(2, "0")}</span>
-        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${scenes.length ? `${scenes.length} 个场景` : (chapter.content ? escapeHtml(chapter.content.slice(0, 18).replace(/\s+/g, " ")) : "还没有正文")}</small></span>
+        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${chapter.content ? escapeHtml(chapter.content.slice(0, 18).replace(/\s+/g, " ")) : "还没有正文"}</small></span>
         <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-delete-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
       </div>
-      ${scenes.length ? `<ol class="scene-list">${scenes.map(scene => `<li class="scene-item ${scene.id === state.activeSceneId ? "active" : ""}" data-scene-id="${scene.id}"><span class="scene-glyph">◇</span><span class="scene-title">${escapeHtml(scene.title)}</span><span class="scene-words">${wordCount(scene.content)}</span></li>`).join("")}</ol>` : ""}
     </li>`;
   }).join("");
   const selectedCount = state.selectedChapterIds.size;
@@ -205,37 +192,24 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
   $("#selectAllChapters").indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < chapters.length;
   $("#chapterCount").textContent = `${state.project.chapters.length} 章`;
   const chapterWords = state.project.chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0);
-  const sceneWords = state.project.scenes.reduce((sum, scene) => sum + wordCount(scene.content), 0);
-  $("#totalWords").textContent = (chapterWords + sceneWords).toLocaleString();
+  $("#totalWords").textContent = chapterWords.toLocaleString();
 }
 
 function renderEditor() {
   const chapter = activeChapter();
   if (!chapter) return;
-  const scene = activeScene();
-  const document = scene || chapter;
   const chapterIndex = state.project.chapters.indexOf(chapter) + 1;
-  if (scene) {
-    const scenes = state.project.scenes.filter(item => item.chapter_id === chapter.id);
-    const sceneIndex = scenes.indexOf(scene) + 1;
-    $("#chapterIndex").textContent = `SCENE ${String(sceneIndex).padStart(2, "0")} · CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
-    $("#chapterSubtitle").textContent = `所属章节：${chapter.title}`;
-  } else {
-    $("#chapterIndex").textContent = `CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
-    $("#chapterSubtitle").textContent = "在安静里，把故事写下来。";
-  }
-  $("#chapterTitleInput").value = document.title;
-  $("#chapterContent").value = document.content;
-  $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
+  $("#chapterIndex").textContent = `CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
+  $("#chapterSubtitle").textContent = "在安静里，把故事写下来。";
+  $("#chapterTitleInput").value = chapter.title;
+  $("#chapterContent").value = chapter.content;
+  $("#chapterWords").textContent = `${wordCount(chapter.content)} 字`;
   renderLinkedNodes();
 }
 
 function renderLinkedNodes() {
   if (!state.project) return;
-  const scene = activeScene();
-  const nodes = scene
-    ? state.project.nodes.filter(node => node.scene_id === scene.id)
-    : state.project.nodes.filter(node => node.chapter_id === state.activeChapterId && !node.scene_id);
+  const nodes = state.project.nodes.filter(node => node.chapter_id === state.activeChapterId);
   const edges = state.project.edges.filter(edge => edge.chapter_id === state.activeChapterId);
   const nodeMap = new Map(state.project.nodes.map(node => [node.id, node.label]));
   const pills = [
@@ -386,7 +360,6 @@ function renderMap() {
   ensureCanvasState();
   $("#clearCanvasButton").disabled = state.project.nodes.length === 0 && state.project.edges.length === 0;
   const chapterMap = new Map(state.project.chapters.map(chapter => [chapter.id, chapter.title]));
-  const sceneMap = new Map(state.project.scenes.map(scene => [scene.id, scene.title]));
   $("#nodeLayer").innerHTML = state.project.nodes.map(node => {
     const notes = state.project.notes.filter(note => note.node_id === node.id);
     const noteCards = notes.map(note => `<div class="node-note-card ${note.locked ? "locked" : ""}" data-note-id="${note.id}" title="点击编辑便签">${escapeHtml(note.content)}</div>`).join("");
@@ -397,7 +370,7 @@ function renderMap() {
     ${notes.length ? `<div class="node-notes-popover has-notes ${notes.some(note => note.locked) ? "has-locked" : ""}">${noteCards}</div>` : ""}
     <div class="node-inner"><span class="node-type">${nodeTypeNames[node.node_type] || "节点"}</span>
     <strong class="node-label">${escapeHtml(node.label)}</strong>
-    ${node.scene_id ? `<span class="node-link">场景 · ${escapeHtml(sceneMap.get(node.scene_id) || "场景已删除")}</span>` : (node.chapter_id ? `<span class="node-link">${escapeHtml(chapterMap.get(node.chapter_id) || "章节已删除")}</span>` : "")}
+    ${node.chapter_id ? `<span class="node-link">${escapeHtml(chapterMap.get(node.chapter_id) || "章节已删除")}</span>` : ""}
     </div>
   </article>`;
   }).join("");
@@ -498,21 +471,7 @@ function connectorPath(source, target, sourcePort, targetPort) {
 function selectChapter(chapterId) {
   if (!state.project?.chapters.some(chapter => chapter.id === chapterId)) return;
   state.activeChapterId = chapterId;
-  state.activeSceneId = null;
   localStorage.setItem("motu.activeChapterId", chapterId);
-  localStorage.removeItem("motu.activeSceneId");
-  renderChapters();
-  renderEditor();
-  switchView("write");
-}
-
-function selectScene(sceneId) {
-  const scene = state.project?.scenes.find(item => item.id === sceneId);
-  if (!scene) return;
-  state.activeChapterId = scene.chapter_id;
-  state.activeSceneId = scene.id;
-  localStorage.setItem("motu.activeChapterId", scene.chapter_id);
-  localStorage.setItem("motu.activeSceneId", scene.id);
   renderChapters();
   renderEditor();
   switchView("write");
@@ -533,9 +492,8 @@ function switchView(view) {
 
 function queueDocumentSave() {
   const document = activeDocument();
-  const scene = activeScene();
   if (!document) return;
-  document.title = $("#chapterTitleInput").value.trim() || (scene ? "未命名场景" : "未命名章节");
+  document.title = $("#chapterTitleInput").value.trim() || "未命名章节";
   document.content = $("#chapterContent").value;
   $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
   renderChapters();
@@ -543,8 +501,7 @@ function queueDocumentSave() {
   clearTimeout(state.chapterTimer);
   state.chapterTimer = setTimeout(async () => {
     try {
-      const path = scene ? `/api/scenes/${document.id}` : `/api/chapters/${document.id}`;
-      const updated = await api(path, { method: "PATCH", body: JSON.stringify({ title: document.title, content: document.content }) });
+      const updated = await api(`/api/chapters/${document.id}`, { method: "PATCH", body: JSON.stringify({ title: document.title, content: document.content }) });
       Object.assign(document, updated);
       setSaveState("已同步", "saved");
     } catch (error) {
@@ -690,7 +647,7 @@ async function setNodeChapterLink(chapterId) {
   const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
   if (!node) return;
   try {
-    const updated = await api(`/api/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify({ chapter_id: chapterId, scene_id: null }) });
+    const updated = await api(`/api/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify({ chapter_id: chapterId }) });
     Object.assign(node, updated);
     state.linkTargetNodeId = null;
     $(".chapter-panel").classList.remove("link-target-mode");
@@ -710,19 +667,14 @@ function openInspector(nodeId) {
   $("#nodeLabel")?.remove();
   $("#nodeType").value = node.node_type;
   $("#nodeChapter").value = node.chapter_id || "";
-  $("#nodeChapter").disabled = Boolean(node.scene_id);
   let labelInput = document.createElement("label");
   labelInput.id = "nodeLabel";
   labelInput.innerHTML = `节点标题<input id="nodeLabelInput" maxlength="120" value="${escapeHtml(node.label)}" />`;
   $("#nodeType").closest("label").before(labelInput);
   $("#nodeLabelInput").addEventListener("input", queueNodeSave);
   $$(".color-picker button").forEach(button => button.classList.toggle("active", button.dataset.color === node.color));
-  const scene = state.project.scenes.find(item => item.id === node.scene_id);
-  $("#createSceneButton").hidden = Boolean(scene);
-  $("#jumpChapterButton").disabled = !node.chapter_id && !scene;
-  $("#jumpChapterButton").textContent = scene ? "打开链接场景" : "打开链接章节";
-  $("#sceneLinkStatus").className = `scene-link-status ${scene ? "linked" : ""}`;
-  $("#sceneLinkStatus").textContent = scene ? `已链接场景：${scene.title}` : "尚未链接场景；创建后可在地图和正文之间双向跳转。";
+  $("#jumpChapterButton").disabled = !node.chapter_id;
+  $("#jumpChapterButton").textContent = "打开链接章节";
   $("#inspector")?.classList.remove("hidden");
   $(".inspector").classList.remove("hidden");
   renderMap();
@@ -735,7 +687,7 @@ function queueNodeSave(event) {
   if (event?.target?.id === "nodeType") node.node_type = event.target.value;
   if (event?.target?.id === "nodeChapter") node.chapter_id = event.target.value || null;
   renderMap();
-  $("#jumpChapterButton").disabled = !node.chapter_id && !node.scene_id;
+  $("#jumpChapterButton").disabled = !node.chapter_id;
   clearTimeout(state.nodeTimer);
   state.nodeTimer = setTimeout(() => saveNode(node, { label: node.label, node_type: node.node_type, chapter_id: node.chapter_id, color: node.color }), 450);
 }
@@ -747,36 +699,10 @@ async function saveNode(node, payload) {
   } catch (error) { setSaveState("保存失败", "error"); toast(error.message); }
 }
 
-async function createSceneFromSelectedNode() {
-  const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
-  if (!node) return;
-  const chapterId = node.chapter_id || state.activeChapterId || state.project.chapters[0]?.id;
-  if (!chapterId) { toast("请先创建一个章节"); return; }
-  $("#createSceneButton").disabled = true;
-  $("#createSceneButton").textContent = "正在创建…";
-  try {
-    const result = await api(`/api/nodes/${node.id}/scene`, {
-      method: "POST",
-      body: JSON.stringify({ chapter_id: chapterId, title: node.label }),
-    });
-    state.project.scenes.push(result.scene);
-    Object.assign(node, result.node);
-    renderAll();
-    $(".inspector").classList.add("hidden");
-    selectScene(result.scene.id);
-    toast("场景已创建，并与故事节点建立双向链接");
-  } catch (error) {
-    toast(error.message);
-    $("#createSceneButton").disabled = false;
-    $("#createSceneButton").textContent = "从节点创建场景";
-  }
-}
-
 function openNodeLinkedContent(node) {
-  if (!node?.scene_id && !node?.chapter_id) return;
+  if (!node?.chapter_id) return;
   $(".inspector").classList.add("hidden");
-  if (node.scene_id) selectScene(node.scene_id);
-  else selectChapter(node.chapter_id);
+  selectChapter(node.chapter_id);
 }
 
 function focusNodeOnMap(nodeId) {
@@ -991,7 +917,7 @@ function bindNodeInteractions() {
     const up = () => {
       element.removeEventListener("pointermove", move); element.removeEventListener("pointerup", up);
       if (moved) saveNode(node, { x: node.x, y: node.y });
-      else if (node.chapter_id || node.scene_id) openNodeLinkedContent(node);
+      else if (node.chapter_id) openNodeLinkedContent(node);
       else selectNodeForActions(node.id);
     };
     element.addEventListener("pointermove", move); element.addEventListener("pointerup", up);
@@ -1198,7 +1124,6 @@ function bindEvents() {
       renderChapters();
       return;
     }
-    const sceneItem = event.target.closest(".scene-item");
     const chapterItem = event.target.closest(".chapter-item");
     if (state.chapterBulkMode && chapterItem) {
       const chapterId = chapterItem.dataset.chapterId;
@@ -1208,12 +1133,10 @@ function bindEvents() {
       return;
     }
     if (state.linkTargetNodeId) {
-      const scene = sceneItem && state.project.scenes.find(item => item.id === sceneItem.dataset.sceneId);
-      const chapterId = scene?.chapter_id || chapterItem?.dataset.chapterId;
+      const chapterId = chapterItem?.dataset.chapterId;
       if (chapterId) { state.selectedNodeId = state.linkTargetNodeId; setNodeChapterLink(chapterId); }
       return;
     }
-    if (sceneItem) { selectScene(sceneItem.dataset.sceneId); return; }
     const item = event.target.closest(".chapter-item"); if (item) selectChapter(item.dataset.chapterId);
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
@@ -1342,7 +1265,6 @@ function bindEvents() {
   });
   $("#nodeType").addEventListener("change", queueNodeSave);
   $("#nodeChapter").addEventListener("change", queueNodeSave);
-  $("#createSceneButton").addEventListener("click", createSceneFromSelectedNode);
   $$(".color-picker button").forEach(button => button.addEventListener("click", () => {
     const node = state.project?.nodes.find(item => item.id === state.selectedNodeId); if (!node) return;
     node.color = button.dataset.color; queueNodeSave(); openInspector(node.id);
@@ -1425,13 +1347,12 @@ function openChapterDeleteDialog(chapterIds) {
   if (state.project.chapters.length - ids.length < 1) { toast("作品至少需要保留一个章节"); return; }
   const deleted = new Set(ids);
   const chapters = state.project.chapters.filter(chapter => deleted.has(chapter.id));
-  const sceneCount = state.project.scenes.filter(scene => deleted.has(scene.chapter_id)).length;
   const nodeLinkCount = state.project.nodes.filter(node => deleted.has(node.chapter_id)).length;
   const edgeLinkCount = state.project.edges.filter(edge => deleted.has(edge.chapter_id)).length;
   state.pendingChapterDeleteIds = ids;
   $("#chapterDeleteTitle").textContent = ids.length === 1 ? "确认删除章节？" : `确认删除 ${ids.length} 个章节？`;
   $("#chapterDeleteSummary").textContent = ids.length === 1 ? `将删除“${chapters[0].title}”。` : `将批量删除选中的 ${ids.length} 个章节。`;
-  $("#chapterDeleteDetails").textContent = `同时删除 ${sceneCount} 个所属场景；${nodeLinkCount} 个节点链接和 ${edgeLinkCount} 个箭头链接会自动断开。`;
+  $("#chapterDeleteDetails").textContent = `${nodeLinkCount} 个节点链接和 ${edgeLinkCount} 个箭头链接会自动断开。`;
   $("#chapterDeleteDialog").showModal();
 }
 
@@ -1449,23 +1370,13 @@ async function deletePendingChapters() {
       body: JSON.stringify({ chapter_ids: ids }),
     });
     const deleted = new Set(ids);
-    const deletedSceneIds = new Set(state.project.scenes.filter(scene => deleted.has(scene.chapter_id)).map(scene => scene.id));
     state.project.chapters = state.project.chapters.filter(chapter => !deleted.has(chapter.id));
     state.project.chapters.forEach((chapter, position) => { chapter.position = position; });
-    state.project.scenes = state.project.scenes.filter(scene => !deleted.has(scene.chapter_id));
-    state.project.nodes.forEach(node => {
-      if (deleted.has(node.chapter_id)) node.chapter_id = null;
-      if (deletedSceneIds.has(node.scene_id)) node.scene_id = null;
-    });
+    state.project.nodes.forEach(node => { if (deleted.has(node.chapter_id)) node.chapter_id = null; });
     state.project.edges.forEach(edge => { if (deleted.has(edge.chapter_id)) edge.chapter_id = null; });
     if (deleted.has(state.activeChapterId)) {
       state.activeChapterId = state.project.chapters[0].id;
-      state.activeSceneId = null;
       localStorage.setItem("motu.activeChapterId", state.activeChapterId);
-      localStorage.removeItem("motu.activeSceneId");
-    } else if (deletedSceneIds.has(state.activeSceneId)) {
-      state.activeSceneId = null;
-      localStorage.removeItem("motu.activeSceneId");
     }
     state.chapterBulkMode = false;
     state.selectedChapterIds.clear();
@@ -1473,7 +1384,7 @@ async function deletePendingChapters() {
     $("#chapterDeleteDialog").close();
     $(".inspector").classList.add("hidden");
     renderAll();
-    toast(`已删除 ${result.chapters} 个章节和 ${result.scenes} 个场景`);
+    toast(`已删除 ${result.chapters} 个章节`);
   } catch (error) {
     if (deletingActiveDocument) queueDocumentSave();
     toast(error.message);
