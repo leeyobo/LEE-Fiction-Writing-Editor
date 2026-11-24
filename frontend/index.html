@@ -107,7 +107,14 @@
             <p class="typography-footnote">背景、稿纸线和夜间模式只保存在当前设备。</p>
           </aside>
           <aside id="findReplacePanel" class="find-replace-panel" aria-label="查找与替换" hidden>
-            <div class="find-panel-heading"><div><p class="eyebrow">FIND &amp; REPLACE</p><h3>查找与替换</h3></div><button id="closeFindReplacePanel" type="button" aria-label="关闭查找与替换">×</button></div>
+            <div id="findPanelDragHandle" class="find-panel-heading" title="拖动调整窗口位置">
+              <div class="find-panel-title"><p class="eyebrow">FIND &amp; REPLACE</p><div><h3>查找与替换</h3><span id="findMinimizedSummary" class="find-minimized-summary">等待查找</span></div></div>
+              <div class="find-window-actions">
+                <button id="findCompactButton" class="find-text-action" type="button" aria-pressed="false" title="切换小窗模式">小窗</button>
+                <button id="findMinimizeButton" type="button" aria-pressed="false" title="最小化查找窗口" aria-label="最小化查找窗口">—</button>
+                <button id="closeFindReplacePanel" type="button" aria-label="关闭查找与替换">×</button>
+              </div>
+            </div>
             <div class="find-panel-body">
               <label class="find-field"><span>查找</span><input id="findTextInput" type="search" placeholder="输入要查找的文字" autocomplete="off" /></label>
               <label class="find-field"><span>替换</span><input id="replaceTextInput" type="text" placeholder="留空可删除匹配文字" autocomplete="off" /></label>

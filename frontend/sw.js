@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v24-find-replace";
+const CACHE = "motu-shell-v25-find-window";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

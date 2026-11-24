@@ -73,6 +73,8 @@ const writingTypographyDefaults = {
 let writingTypography = { ...writingTypographyDefaults };
 const writingAppearanceDefaults = { theme: "mist", guide: "none", night: false };
 let writingAppearance = { ...writingAppearanceDefaults };
+const findPanelLayoutDefaults = { x: null, y: null, compact: false, minimized: false };
+let findPanelLayout = { ...findPanelLayoutDefaults };
 
 function normalizedServerUrl(value = state.config.serverUrl) {
   return value.trim().replace(/\/+$/, "");
@@ -702,10 +704,11 @@ function updateFindControls() {
   const total = state.find.records.length;
   const current = total ? state.find.currentIndex + 1 : 0;
   $("#findMatchCounter").textContent = `${current} / ${total}`;
+  const query = $("#findTextInput").value;
+  $("#findMinimizedSummary").textContent = query ? `${query} · ${current}/${total}` : "等待查找";
   $("#findPreviousButton").disabled = total === 0;
   $("#findNextButton").disabled = total === 0;
   $("#replaceCurrentButton").disabled = total === 0;
-  const query = $("#findTextInput").value;
   const activeMatches = query ? markdownTextRanges(activeChapter()?.content || "", query).ranges.length : 0;
   const bookMatches = query && state.project ? state.project.chapters.reduce((sum, chapter) => sum + markdownTextRanges(chapter.content || "", query).ranges.length, 0) : 0;
   $("#replaceChapterButton").disabled = activeMatches === 0;
@@ -759,6 +762,105 @@ function setFindScope(scope) {
   refreshFindResults({ reset: true });
 }
 
+function normalizedFindPanelLayout(value = {}) {
+  const finiteOrNull = candidate => candidate === null || candidate === undefined || candidate === "" ? null : (Number.isFinite(Number(candidate)) ? Number(candidate) : null);
+  return {
+    x: finiteOrNull(value.x),
+    y: finiteOrNull(value.y),
+    compact: Boolean(value.compact),
+    minimized: Boolean(value.minimized),
+  };
+}
+
+function loadFindPanelLayout() {
+  try {
+    findPanelLayout = normalizedFindPanelLayout(JSON.parse(localStorage.getItem("motu.findPanelLayout") || "{}"));
+  } catch (_) {
+    findPanelLayout = { ...findPanelLayoutDefaults };
+  }
+  applyFindPanelLayout();
+}
+
+function saveFindPanelLayout() {
+  applyFindPanelLayout();
+  localStorage.setItem("motu.findPanelLayout", JSON.stringify(findPanelLayout));
+}
+
+function applyFindPanelLayout() {
+  const panel = $("#findReplacePanel");
+  if (!panel) return;
+  panel.classList.toggle("compact", findPanelLayout.compact);
+  panel.classList.toggle("minimized", findPanelLayout.minimized);
+  const compactButton = $("#findCompactButton");
+  compactButton?.setAttribute("aria-pressed", String(findPanelLayout.compact));
+  if (compactButton) {
+    compactButton.textContent = findPanelLayout.compact ? "标准窗" : "小窗";
+    compactButton.title = findPanelLayout.compact ? "切换到标准窗口" : "切换小窗模式";
+  }
+  const minimizeButton = $("#findMinimizeButton");
+  minimizeButton?.setAttribute("aria-pressed", String(findPanelLayout.minimized));
+  if (minimizeButton) {
+    const label = findPanelLayout.minimized ? "恢复查找窗口" : "最小化查找窗口";
+    minimizeButton.textContent = findPanelLayout.minimized ? "▢" : "—";
+    minimizeButton.title = label;
+    minimizeButton.setAttribute("aria-label", label);
+  }
+  if (window.innerWidth <= 900) {
+    panel.style.left = "10px";
+    panel.style.top = "112px";
+    panel.style.transform = "none";
+    return;
+  }
+  if (findPanelLayout.x === null || findPanelLayout.y === null) {
+    panel.style.removeProperty("left");
+    panel.style.removeProperty("top");
+    panel.style.removeProperty("transform");
+    return;
+  }
+  const width = panel.getBoundingClientRect().width || (findPanelLayout.compact ? 430 : 620);
+  const height = panel.getBoundingClientRect().height || 64;
+  findPanelLayout.x = Math.max(8, Math.min(window.innerWidth - width - 8, findPanelLayout.x));
+  findPanelLayout.y = Math.max(8, Math.min(window.innerHeight - height - 8, findPanelLayout.y));
+  panel.style.left = `${findPanelLayout.x}px`;
+  panel.style.top = `${findPanelLayout.y}px`;
+  panel.style.transform = "none";
+}
+
+function bindFindPanelDrag() {
+  const panel = $("#findReplacePanel");
+  const handle = $("#findPanelDragHandle");
+  if (!panel || !handle) return;
+  handle.addEventListener("pointerdown", event => {
+    if (window.innerWidth <= 900 || event.button !== 0 || event.target.closest("button")) return;
+    const rect = panel.getBoundingClientRect();
+    const start = { pointerX: event.clientX, pointerY: event.clientY, left: rect.left, top: rect.top };
+    handle.setPointerCapture(event.pointerId);
+    panel.classList.add("dragging");
+    event.preventDefault();
+    const move = moveEvent => {
+      const width = panel.getBoundingClientRect().width;
+      const height = panel.getBoundingClientRect().height;
+      const left = Math.max(8, Math.min(window.innerWidth - width - 8, start.left + moveEvent.clientX - start.pointerX));
+      const top = Math.max(8, Math.min(window.innerHeight - height - 8, start.top + moveEvent.clientY - start.pointerY));
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      panel.style.transform = "none";
+      findPanelLayout.x = left;
+      findPanelLayout.y = top;
+    };
+    const finish = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      panel.classList.remove("dragging");
+      localStorage.setItem("motu.findPanelLayout", JSON.stringify(findPanelLayout));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  });
+}
+
 function setFindReplacePanel(open, focusReplacement = false) {
   const panel = $("#findReplacePanel");
   const button = $("#findReplaceButton");
@@ -775,8 +877,9 @@ function setFindReplacePanel(open, focusReplacement = false) {
     clearFindHighlights();
     return;
   }
+  applyFindPanelLayout();
   refreshFindResults({ reset: true });
-  requestAnimationFrame(() => (focusReplacement ? $("#replaceTextInput") : $("#findTextInput")).focus());
+  if (!findPanelLayout.minimized) requestAnimationFrame(() => (focusReplacement ? $("#replaceTextInput") : $("#findTextInput")).focus());
 }
 
 function replaceCurrentFindMatch() {
@@ -866,6 +969,7 @@ function activeDocument() {
 async function boot() {
   loadWritingTypography();
   loadWritingAppearance();
+  loadFindPanelLayout();
   bindEvents();
   $("#serverUrl").value = state.config.serverUrl;
   $("#apiKey").value = state.config.apiKey;
@@ -1989,9 +2093,23 @@ function bindEvents() {
   });
   $("#findReplaceButton").addEventListener("click", event => {
     event.stopPropagation();
-    setFindReplacePanel($("#findReplacePanel").hidden);
+    const opening = $("#findReplacePanel").hidden;
+    if (opening && findPanelLayout.minimized) {
+      findPanelLayout.minimized = false;
+      saveFindPanelLayout();
+    }
+    setFindReplacePanel(opening);
   });
   $("#closeFindReplacePanel").addEventListener("click", () => setFindReplacePanel(false));
+  $("#findCompactButton").addEventListener("click", () => {
+    findPanelLayout.compact = !findPanelLayout.compact;
+    saveFindPanelLayout();
+  });
+  $("#findMinimizeButton").addEventListener("click", () => {
+    findPanelLayout.minimized = !findPanelLayout.minimized;
+    saveFindPanelLayout();
+    if (!findPanelLayout.minimized) requestAnimationFrame(() => $("#findTextInput").focus());
+  });
   $("#findTextInput").addEventListener("input", () => refreshFindResults({ reset: true }));
   $("#findTextInput").addEventListener("keydown", event => {
     if (event.key !== "Enter") return;
@@ -2136,6 +2254,7 @@ function bindEvents() {
   bindNodeInteractions();
   bindCanvasSelection();
   bindMinimapInteractions();
+  bindFindPanelDrag();
   document.addEventListener("pointerdown", event => {
     if (!event.target.closest("#canvasContextMenu")) $("#canvasContextMenu").hidden = true;
     if (!event.target.closest("#shortcutPanel") && !event.target.closest("#shortcutHelpButton")) setShortcutPanel(false);
@@ -2149,12 +2268,22 @@ function bindEvents() {
     if (modifier && (event.code === "KeyF" || event.code === "KeyH")) {
       event.preventDefault();
       if (!$("#writeView").classList.contains("active")) switchView("write");
+      if (findPanelLayout.minimized) {
+        findPanelLayout.minimized = false;
+        saveFindPanelLayout();
+      }
       setFindReplacePanel(true, event.code === "KeyH");
       return;
     }
     if (event.key === "F3" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
-      if ($("#findReplacePanel").hidden) setFindReplacePanel(true);
+      if ($("#findReplacePanel").hidden) {
+        if (findPanelLayout.minimized) {
+          findPanelLayout.minimized = false;
+          saveFindPanelLayout();
+        }
+        setFindReplacePanel(true);
+      }
       else navigateFind(event.shiftKey ? -1 : 1);
       return;
     }
@@ -2164,7 +2293,7 @@ function bindEvents() {
     if (!$("#backgroundPanel").hidden) setBackgroundPanel(false);
     if (!$("#findReplacePanel").hidden) setFindReplacePanel(false);
   });
-  window.addEventListener("resize", () => requestAnimationFrame(() => { applyCamera(); resizeManuscript(); }));
+  window.addEventListener("resize", () => requestAnimationFrame(() => { applyCamera(); resizeManuscript(); applyFindPanelLayout(); }));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));
 }
 
