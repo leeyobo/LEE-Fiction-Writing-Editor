@@ -401,7 +401,7 @@ function normalizedTypography(value = {}) {
   };
   return {
     fontFamily: writingFontStacks[value.fontFamily] ? value.fontFamily : writingTypographyDefaults.fontFamily,
-    fontSize: numberInRange(value.fontSize, writingTypographyDefaults.fontSize, 14, 28),
+    fontSize: numberInRange(value.fontSize, writingTypographyDefaults.fontSize, 14, 50),
     lineHeight: numberInRange(value.lineHeight, writingTypographyDefaults.lineHeight, 1.4, 2.8),
     width: numberInRange(value.width, writingTypographyDefaults.width, 620, 1280),
     color: /^#[0-9a-f]{6}$/i.test(value.color || "") ? value.color : writingTypographyDefaults.color,
