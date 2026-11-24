@@ -312,11 +312,12 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .arrow-preview { font-size: 24px; line-height: 18px; }
 .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; }
 .blue, [data-color="blue"] { background: #2563eb; }.violet, [data-color="violet"] { background: #7c3aed; }.green, [data-color="green"] { background: #0f9f78; }.amber, [data-color="amber"] { background: #e59a28; }.rose, [data-color="rose"] { background: #dc5670; }.slate, [data-color="slate"] { background: #64748b; }
-.map-viewport { position: relative; flex: 1; overflow: hidden; background-color: #f5f9ff; background-image: radial-gradient(#bfd2ef 1px, transparent 1px); background-size: 24px 24px; overscroll-behavior: none; touch-action: none; }
+.map-viewport { position: relative; flex: 1; overflow: hidden; background-color: #f5f9ff; background-image: radial-gradient(#bfd2ef 1px, transparent 1px); background-size: 24px 24px; overscroll-behavior: none; touch-action: none; cursor: grab; }
 .node-layer, .edge-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 .node-layer { z-index: 2; pointer-events: none; transform-origin: 0 0; will-change: transform; }
 .map-viewport.pan-mode, .map-viewport.space-pan { cursor: grab; }
 .map-viewport.panning { cursor: grabbing; }
+.map-viewport.selecting-region { cursor: crosshair; }
 .map-viewport.pan-mode .story-node, .map-viewport.space-pan .story-node, .map-viewport.panning .story-node { cursor: inherit; }
 .edge-layer { z-index: 1; overflow: visible; pointer-events: none; }
 .edge-layer .edge-line, .edge-layer .edge-hit { fill: none; pointer-events: stroke; cursor: pointer; }

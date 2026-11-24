@@ -206,11 +206,11 @@
               <p>从上方工具箱拖入图形，用箭头连接，再为图形添加便签或章节链接。</p>
               <button id="emptyAddButton" type="button">添加第一个长方形</button>
             </div>
-            <div class="map-help">拖入图形 · 空格/中键拖动画布 · 空白处框选 · 滚轮平移 · 右键编辑或删除</div>
+            <div class="map-help">空白处拖动画布 · 图形可直接操作 · Shift+拖动框选 · 空格/中键临时抓手 · 滚轮平移</div>
             <aside id="minimapPanel" class="minimap-panel hidden" aria-label="画布缩略图">
               <div id="minimapHandle" class="minimap-handle"><strong>画布导航</strong><span>拖动此处移动缩略图</span></div>
               <svg id="minimapSvg" class="minimap-svg" role="img" aria-label="流程图缩略图" preserveAspectRatio="none"></svg>
-              <div class="minimap-actions"><button id="panModeButton" type="button">抓手</button><button id="centerCanvasButton" type="button">回到中心</button></div>
+              <div class="minimap-actions"><button id="panModeButton" type="button" aria-pressed="false" title="锁定后可从图形上直接拖动画布">锁定抓手</button><button id="centerCanvasButton" type="button">回到中心</button></div>
             </aside>
             <div id="canvasContextMenu" class="canvas-context-menu" hidden>
               <button type="button" data-context-action="edit-edge">编辑连线</button>

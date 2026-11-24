@@ -25,7 +25,7 @@ const state = {
   canvasAnchor: null,
   canvasBounds: null,
   canvasInitialized: false,
-  panMode: false,
+  panMode: localStorage.getItem("motu.canvasPanMode") === "locked",
   spacePressed: false,
   ignoreCanvasClick: false,
   chapterTimer: null,
@@ -2089,27 +2089,49 @@ function edgePathIntersectsRegion(path, region, viewportBounds) {
 function startCanvasPan(event) {
   event.preventDefault();
   const viewport = $("#mapViewport");
+  const clearOnStationaryClick = event.button === 0 && !state.panMode && !state.spacePressed;
   const startX = event.clientX; const startY = event.clientY;
   const origin = { ...state.camera };
+  let moved = false;
   viewport.classList.add("panning");
   const move = moveEvent => {
-    state.camera.x = origin.x + moveEvent.clientX - startX;
-    state.camera.y = origin.y + moveEvent.clientY - startY;
+    const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    state.camera.x = origin.x + dx;
+    state.camera.y = origin.y + dy;
     applyCamera();
   };
   const finish = () => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointercancel", finish);
     viewport.classList.remove("panning");
-    state.ignoreCanvasClick = true;
-    setTimeout(() => { state.ignoreCanvasClick = false; }, 120);
+    if (moved) {
+      state.ignoreCanvasClick = true;
+      setTimeout(() => { state.ignoreCanvasClick = false; }, 120);
+    } else if (clearOnStationaryClick) clearCanvasSelection();
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", finish, { once: true });
+  window.addEventListener("pointercancel", finish, { once: true });
+}
+
+function setCanvasInteractionMode(locked, announce = false) {
+  state.panMode = Boolean(locked);
+  const viewport = $("#mapViewport");
+  const button = $("#panModeButton");
+  viewport.classList.toggle("pan-mode", state.panMode);
+  button.classList.toggle("active", state.panMode);
+  button.setAttribute("aria-pressed", String(state.panMode));
+  button.textContent = state.panMode ? "退出锁定" : "锁定抓手";
+  button.title = state.panMode ? "退出后可同时拖动画布和操作图形" : "锁定后可从图形上直接拖动画布";
+  localStorage.setItem("motu.canvasPanMode", state.panMode ? "locked" : "mixed");
+  if (announce) toast(state.panMode ? "已锁定抓手：拖动任意位置都将平移画布" : "已开启导航与编辑并存模式");
 }
 
 function bindMinimapInteractions() {
   const viewport = $("#mapViewport"); const panel = $("#minimapPanel"); const handle = $("#minimapHandle"); const svg = $("#minimapSvg");
+  setCanvasInteractionMode(state.panMode);
   try {
     const saved = JSON.parse(localStorage.getItem("motu.minimapPosition") || "null");
     if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
@@ -2154,10 +2176,8 @@ function bindMinimapInteractions() {
   });
   $("#centerCanvasButton").addEventListener("click", event => { event.stopPropagation(); centerCanvasOnAnchor(); });
   $("#panModeButton").addEventListener("click", event => {
-    event.stopPropagation(); state.panMode = !state.panMode;
-    event.currentTarget.classList.toggle("active", state.panMode);
-    viewport.classList.toggle("pan-mode", state.panMode);
-    event.currentTarget.textContent = state.panMode ? "退出抓手" : "抓手";
+    event.stopPropagation();
+    setCanvasInteractionMode(!state.panMode, true);
   });
   viewport.addEventListener("wheel", event => {
     if (event.target.closest(".minimap-panel")) return;
@@ -2176,13 +2196,18 @@ function bindMinimapInteractions() {
 function bindCanvasSelection() {
   const viewport = $("#mapViewport");
   viewport.addEventListener("pointerdown", event => {
+    if (event.target.closest(".minimap-panel, .canvas-context-menu")) return;
     if (state.panMode || state.spacePressed || event.button === 1) { startCanvasPan(event); return; }
-    if (event.button !== 0 || event.target.closest("button, .story-node, .node-quick-actions, .canvas-context-menu, .map-empty, [data-edge-id]")) return;
+    if (event.button !== 0) return;
+    const interactiveTarget = event.target.closest("button, .story-node, .node-quick-actions, .canvas-context-menu, .map-empty, .minimap-panel, [data-edge-id]");
+    if (interactiveTarget) return;
+    if (!event.shiftKey) { startCanvasPan(event); return; }
     const bounds = viewport.getBoundingClientRect();
     const start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top, clientX: event.clientX, clientY: event.clientY };
     state.selectionDrag = { start, current: start };
     const rectElement = $("#selectionRect");
     rectElement.hidden = false;
+    viewport.classList.add("selecting-region");
     const draw = current => {
       const left = Math.min(start.x, current.x); const top = Math.min(start.y, current.y);
       rectElement.style.left = `${left}px`; rectElement.style.top = `${top}px`;
@@ -2198,6 +2223,7 @@ function bindCanvasSelection() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
       rectElement.hidden = true;
+      viewport.classList.remove("selecting-region");
       const current = state.selectionDrag?.current || start;
       state.selectionDrag = null;
       const moved = Math.abs(current.x - start.x) + Math.abs(current.y - start.y) > 8;
