@@ -35,6 +35,28 @@ const state = {
 
 const nodeTypeNames = { plot: "情节", character: "人物", place: "地点", conflict: "冲突", note: "便签" };
 const nodeTypeColors = { plot: "blue", character: "violet", place: "green", conflict: "rose", note: "amber" };
+const markdownShortcuts = [
+  { category: "文本格式", name: "粗体", keys: ["Ctrl", "B"], action: "bold" },
+  { category: "文本格式", name: "斜体", keys: ["Ctrl", "I"], action: "italic" },
+  { category: "文本格式", name: "下划线", keys: ["Ctrl", "U"], action: "underline" },
+  { category: "文本格式", name: "删除线", keys: ["Alt", "Shift", "5"], action: "strike" },
+  { category: "文本格式", name: "行内代码", keys: ["Ctrl", "Shift", "`"], action: "inlineCode" },
+  { category: "文本格式", name: "超链接", keys: ["Ctrl", "K"], action: "link" },
+  { category: "文本格式", name: "图片", keys: ["Ctrl", "Shift", "I"], action: "image" },
+  { category: "段落结构", name: "正文段落", keys: ["Ctrl", "0"], action: "paragraph" },
+  { category: "段落结构", name: "一至六级标题", keys: ["Ctrl", "1–6"], action: "heading1" },
+  { category: "段落结构", name: "引用", keys: ["Ctrl", "Shift", "Q"], action: "quote" },
+  { category: "段落结构", name: "代码块", keys: ["Ctrl", "Shift", "K"], action: "codeFence" },
+  { category: "段落结构", name: "数学公式块", keys: ["Ctrl", "Shift", "M"], action: "mathBlock" },
+  { category: "段落结构", name: "有序列表", keys: ["Ctrl", "Shift", "["], action: "orderedList" },
+  { category: "段落结构", name: "无序列表", keys: ["Ctrl", "Shift", "]"], action: "unorderedList" },
+  { category: "段落结构", name: "表格", keys: ["Ctrl", "T"], action: "table" },
+  { category: "编辑与选择", name: "保存", keys: ["Ctrl", "S"], action: "save" },
+  { category: "编辑与选择", name: "选择当前行", keys: ["Ctrl", "L"], action: "selectLine" },
+  { category: "编辑与选择", name: "选择当前词", keys: ["Ctrl", "D"], action: "selectWord" },
+  { category: "编辑与选择", name: "增加缩进", keys: ["Tab"], action: "indent" },
+  { category: "编辑与选择", name: "减少缩进", keys: ["Shift", "Tab"], action: "outdent" },
+];
 
 function normalizedServerUrl(value = state.config.serverUrl) {
   return value.trim().replace(/\/+$/, "");
@@ -87,6 +109,165 @@ function wordCount(text = "") {
   const chinese = (text.match(/[\u3400-\u9fff]/g) || []).length;
   const latin = (text.replace(/[\u3400-\u9fff]/g, " ").match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) || []).length;
   return chinese + latin;
+}
+
+function resizeManuscript() {
+  const editor = $("#chapterContent");
+  if (!editor) return;
+  editor.style.height = "auto";
+  editor.style.height = `${Math.max(editor.scrollHeight, 640)}px`;
+}
+
+function replaceMarkdownSelection(text, selectionOffset = null, selectionLength = 0) {
+  const editor = $("#chapterContent");
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  editor.setRangeText(text, start, end, "end");
+  if (selectionOffset !== null) {
+    editor.setSelectionRange(start + selectionOffset, start + selectionOffset + selectionLength);
+  }
+  editor.focus();
+  resizeManuscript();
+  queueDocumentSave();
+}
+
+function wrapMarkdownSelection(prefix, suffix, placeholder) {
+  const editor = $("#chapterContent");
+  const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+  const content = selected || placeholder;
+  replaceMarkdownSelection(`${prefix}${content}${suffix}`, prefix.length, content.length);
+}
+
+function transformMarkdownLines(transform) {
+  const editor = $("#chapterContent");
+  const value = editor.value;
+  const selectionStart = editor.selectionStart;
+  const selectionEnd = editor.selectionEnd;
+  const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+  const nextBreak = value.indexOf("\n", selectionEnd);
+  const blockEnd = nextBreak === -1 ? value.length : nextBreak;
+  const original = value.slice(blockStart, blockEnd);
+  const replacement = transform(original.split("\n")).join("\n");
+  editor.setSelectionRange(blockStart, blockEnd);
+  editor.setRangeText(replacement, blockStart, blockEnd, "select");
+  editor.focus();
+  resizeManuscript();
+  queueDocumentSave();
+}
+
+function stripMarkdownBlockPrefix(line) {
+  return line.replace(/^(?:#{1,6}\s+|>\s+|[-+*]\s+|\d+\.\s+)/, "");
+}
+
+function selectCurrentLine() {
+  const editor = $("#chapterContent");
+  const start = editor.value.lastIndexOf("\n", Math.max(0, editor.selectionStart - 1)) + 1;
+  const nextBreak = editor.value.indexOf("\n", editor.selectionEnd);
+  editor.setSelectionRange(start, nextBreak === -1 ? editor.value.length : nextBreak);
+}
+
+function selectCurrentWord() {
+  const editor = $("#chapterContent");
+  if (editor.selectionStart !== editor.selectionEnd) return;
+  const isWord = character => Boolean(character && /[\p{L}\p{N}_-]/u.test(character));
+  let start = editor.selectionStart;
+  let end = editor.selectionEnd;
+  while (start > 0 && isWord(editor.value[start - 1])) start -= 1;
+  while (end < editor.value.length && isWord(editor.value[end])) end += 1;
+  editor.setSelectionRange(start, end);
+}
+
+function applyMarkdownAction(action) {
+  const editor = $("#chapterContent");
+  if (!editor || !activeDocument()) return;
+  if (action === "bold") wrapMarkdownSelection("**", "**", "粗体文字");
+  else if (action === "italic") wrapMarkdownSelection("*", "*", "斜体文字");
+  else if (action === "underline") wrapMarkdownSelection("<u>", "</u>", "下划线文字");
+  else if (action === "strike") wrapMarkdownSelection("~~", "~~", "删除线文字");
+  else if (action === "inlineCode") wrapMarkdownSelection("`", "`", "代码");
+  else if (action === "link") {
+    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "链接文字";
+    const text = `[${selected}](https://)`;
+    replaceMarkdownSelection(text, selected.length + 3, 8);
+  } else if (action === "image") {
+    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "图片说明";
+    const text = `![${selected}](图片地址)`;
+    replaceMarkdownSelection(text, selected.length + 4, 4);
+  } else if (/^heading[1-6]$/.test(action)) {
+    const level = Number(action.slice(-1));
+    transformMarkdownLines(lines => lines.map(line => `${"#".repeat(level)} ${stripMarkdownBlockPrefix(line)}`));
+  } else if (action === "paragraph") transformMarkdownLines(lines => lines.map(stripMarkdownBlockPrefix));
+  else if (action === "quote") transformMarkdownLines(lines => lines.map(line => `> ${stripMarkdownBlockPrefix(line)}`));
+  else if (action === "unorderedList") transformMarkdownLines(lines => lines.map(line => `- ${stripMarkdownBlockPrefix(line)}`));
+  else if (action === "orderedList") transformMarkdownLines(lines => lines.map((line, index) => `${index + 1}. ${stripMarkdownBlockPrefix(line)}`));
+  else if (action === "indent") transformMarkdownLines(lines => lines.map(line => `  ${line}`));
+  else if (action === "outdent") transformMarkdownLines(lines => lines.map(line => line.replace(/^(?: {1,2}|\t)/, "")));
+  else if (action === "codeFence") {
+    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "代码";
+    replaceMarkdownSelection(`\`\`\`\n${selected}\n\`\`\``, 4, selected.length);
+  } else if (action === "mathBlock") {
+    const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd) || "公式";
+    replaceMarkdownSelection(`$$\n${selected}\n$$`, 3, selected.length);
+  } else if (action === "table") {
+    replaceMarkdownSelection("| 列 1 | 列 2 |\n| --- | --- |\n| 内容 | 内容 |", 2, 3);
+  } else if (action === "selectLine") selectCurrentLine();
+  else if (action === "selectWord") selectCurrentWord();
+  else if (action === "save") { queueDocumentSave(); toast("正在保存章节"); }
+}
+
+function renderShortcutGroups(query = "") {
+  const normalizeShortcutSearch = value => value.trim().toLowerCase().replace(/[+\s]/g, "");
+  const normalized = normalizeShortcutSearch(query);
+  const matches = markdownShortcuts.filter(shortcut => (
+    normalizeShortcutSearch(`${shortcut.category} ${shortcut.name} ${shortcut.keys.join(" ")}`).includes(normalized)
+  ));
+  const categories = [...new Set(markdownShortcuts.map(shortcut => shortcut.category))];
+  const markup = categories.map(category => {
+    const shortcuts = matches.filter(shortcut => shortcut.category === category);
+    if (!shortcuts.length) return "";
+    return `<section class="shortcut-group"><h4>${escapeHtml(category)}</h4><div class="shortcut-list">${shortcuts.map(shortcut => (
+      `<div class="shortcut-row"><span>${escapeHtml(shortcut.name)}</span><span class="shortcut-keys">${shortcut.keys.map(key => `<kbd>${escapeHtml(key)}</kbd>`).join("")}</span></div>`
+    )).join("")}</div></section>`;
+  }).join("");
+  $("#shortcutGroups").innerHTML = markup || '<p class="shortcut-empty">没有找到相关快捷键</p>';
+}
+
+function setShortcutPanel(open) {
+  const panel = $("#shortcutPanel");
+  const button = $("#shortcutHelpButton");
+  panel.hidden = !open;
+  button.classList.toggle("active", open);
+  button.setAttribute("aria-expanded", String(open));
+  if (open) {
+    renderShortcutGroups($("#shortcutSearch").value);
+    requestAnimationFrame(() => $("#shortcutSearch").focus());
+  }
+}
+
+function handleMarkdownShortcut(event) {
+  const mod = event.ctrlKey || event.metaKey;
+  let action = null;
+  if (event.key === "Tab" && !mod && !event.altKey) action = event.shiftKey ? "outdent" : "indent";
+  else if (event.altKey && event.shiftKey && event.code === "Digit5") action = "strike";
+  else if (mod && event.shiftKey && event.code === "Backquote") action = "inlineCode";
+  else if (mod && event.shiftKey && event.code === "KeyK") action = "codeFence";
+  else if (mod && event.shiftKey && event.code === "KeyQ") action = "quote";
+  else if (mod && event.shiftKey && event.code === "KeyM") action = "mathBlock";
+  else if (mod && event.shiftKey && event.code === "KeyI") action = "image";
+  else if (mod && event.shiftKey && event.code === "BracketLeft") action = "orderedList";
+  else if (mod && event.shiftKey && event.code === "BracketRight") action = "unorderedList";
+  else if (mod && !event.shiftKey && /^Digit[0-6]$/.test(event.code)) action = event.code === "Digit0" ? "paragraph" : `heading${event.code.slice(-1)}`;
+  else if (mod && !event.shiftKey && event.code === "KeyB") action = "bold";
+  else if (mod && !event.shiftKey && event.code === "KeyI") action = "italic";
+  else if (mod && !event.shiftKey && event.code === "KeyU") action = "underline";
+  else if (mod && !event.shiftKey && event.code === "KeyK") action = "link";
+  else if (mod && !event.shiftKey && event.code === "KeyT") action = "table";
+  else if (mod && !event.shiftKey && event.code === "KeyS") action = "save";
+  else if (mod && !event.shiftKey && event.code === "KeyL") action = "selectLine";
+  else if (mod && !event.shiftKey && event.code === "KeyD") action = "selectWord";
+  if (!action) return;
+  event.preventDefault();
+  applyMarkdownAction(action);
 }
 
 function activeChapter() {
@@ -205,6 +386,7 @@ function renderEditor() {
   $("#chapterContent").value = chapter.content;
   $("#chapterWords").textContent = `${wordCount(chapter.content)} 字`;
   renderLinkedNodes();
+  requestAnimationFrame(resizeManuscript);
 }
 
 function renderLinkedNodes() {
@@ -478,6 +660,7 @@ function selectChapter(chapterId) {
 }
 
 function switchView(view) {
+  if ($("#shortcutPanel")) setShortcutPanel(false);
   $$(".view-button").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   $$(".view-panel").forEach(panel => panel.classList.remove("active", "mobile-active"));
   const panel = view === "map" ? $("#mapView") : $("#writeView");
@@ -1151,14 +1334,15 @@ function bindEvents() {
   $("#deleteSelectedChaptersButton").addEventListener("click", () => openChapterDeleteDialog([...state.selectedChapterIds]));
   $("#confirmChapterDeleteButton").addEventListener("click", deletePendingChapters);
   $("#chapterTitleInput").addEventListener("input", queueDocumentSave);
-  $("#chapterContent").addEventListener("input", queueDocumentSave);
-  $$(".format-tools button").forEach(button => button.addEventListener("click", () => {
-    const editor = $("#chapterContent");
-    const start = editor.selectionStart; const end = editor.selectionEnd; const selected = editor.value.slice(start, end);
-    if (button.dataset.insert) editor.setRangeText(selected ? `${button.dataset.insert.slice(0, button.dataset.insert.length / 2)}${selected}${button.dataset.insert.slice(button.dataset.insert.length / 2)}` : button.dataset.insert, start, end, "end");
-    else if (button.dataset.prefix) editor.setRangeText(button.dataset.prefix + selected, start, end, "end");
-    editor.focus(); queueDocumentSave();
-  }));
+  $("#chapterContent").addEventListener("input", () => { resizeManuscript(); queueDocumentSave(); });
+  $("#chapterContent").addEventListener("keydown", handleMarkdownShortcut);
+  $$(".format-tools [data-md-action]").forEach(button => button.addEventListener("click", () => applyMarkdownAction(button.dataset.mdAction)));
+  $("#shortcutHelpButton").addEventListener("click", event => {
+    event.stopPropagation();
+    setShortcutPanel($("#shortcutPanel").hidden);
+  });
+  $("#closeShortcutPanel").addEventListener("click", () => setShortcutPanel(false));
+  $("#shortcutSearch").addEventListener("input", event => renderShortcutGroups(event.currentTarget.value));
   $("#focusButton").addEventListener("click", () => $("#app").classList.toggle("focus-mode"));
   $("#editorMapButton").addEventListener("click", () => switchView("map"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
@@ -1285,10 +1469,12 @@ function bindEvents() {
   bindMinimapInteractions();
   document.addEventListener("pointerdown", event => {
     if (!event.target.closest("#canvasContextMenu")) $("#canvasContextMenu").hidden = true;
+    if (!event.target.closest("#shortcutPanel") && !event.target.closest("#shortcutHelpButton")) setShortcutPanel(false);
     const inspector = $("#inspector");
     if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
   });
-  window.addEventListener("resize", () => requestAnimationFrame(applyCamera));
+  document.addEventListener("keydown", event => { if (event.key === "Escape" && !$("#shortcutPanel").hidden) setShortcutPanel(false); });
+  window.addEventListener("resize", () => requestAnimationFrame(() => { applyCamera(); resizeManuscript(); }));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));
 }
 

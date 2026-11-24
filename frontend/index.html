@@ -52,15 +52,22 @@
         <section id="writeView" class="write-view view-panel">
           <div class="editor-toolbar">
             <div class="format-tools" aria-label="文本工具">
-              <button type="button" data-insert="**粗体**"><b>B</b></button>
-              <button type="button" data-insert="*斜体*"><i>I</i></button>
+              <button type="button" data-md-action="bold" title="粗体（Ctrl+B）"><b>B</b></button>
+              <button type="button" data-md-action="italic" title="斜体（Ctrl+I）"><i>I</i></button>
               <span></span>
-              <button type="button" data-prefix="# ">H1</button>
-              <button type="button" data-prefix="> ">引用</button>
-              <button type="button" data-prefix="- ">列表</button>
+              <button type="button" data-md-action="heading1" title="一级标题（Ctrl+1）">H1</button>
+              <button type="button" data-md-action="quote" title="引用（Ctrl+Shift+Q）">引用</button>
+              <button type="button" data-md-action="unorderedList" title="无序列表（Ctrl+Shift+]）">列表</button>
+              <button type="button" data-md-action="inlineCode" title="行内代码（Ctrl+Shift+`）">代码</button>
             </div>
-            <div class="editor-meta"><button id="editorMapButton" class="editor-map-button" type="button">故事地图</button><span id="chapterWords">0 字</span><span>Markdown</span></div>
+            <div class="editor-meta"><button id="shortcutHelpButton" class="shortcut-help-button" type="button" aria-expanded="false" aria-controls="shortcutPanel">⌨ 快捷键</button><button id="editorMapButton" class="editor-map-button" type="button">故事地图</button><span id="chapterWords">0 字</span><span>Markdown</span></div>
           </div>
+          <aside id="shortcutPanel" class="shortcut-panel" aria-label="Typora 风格快捷键" hidden>
+            <div class="shortcut-panel-heading"><div><p class="eyebrow">MARKDOWN SHORTCUTS</p><h3>Typora 风格快捷键</h3></div><button id="closeShortcutPanel" type="button" aria-label="关闭快捷键窗口">×</button></div>
+            <label class="shortcut-search"><span>⌕</span><input id="shortcutSearch" type="search" placeholder="搜索名称、分类或组合键" autocomplete="off" /></label>
+            <div id="shortcutGroups" class="shortcut-groups"></div>
+            <p class="shortcut-footnote">仅在正文编辑区聚焦时生效；Windows 使用 Ctrl，macOS 可使用 Command。</p>
+          </aside>
           <article class="paper">
             <div class="paper-heading">
               <span id="chapterIndex" class="chapter-index">CHAPTER 01</span>
