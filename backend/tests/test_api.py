@@ -102,6 +102,17 @@ class ApiFlowTest(unittest.TestCase):
         self.assertEqual(final["nodes"][0]["scene_id"], scene["id"])
         self.assertEqual(final["scenes"][0]["content"], "Rain covers the old harbor.")
 
+        cleared = self.client.delete(f"/api/projects/{project['id']}/canvas")
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json(), {"nodes": 2, "edges": 1, "notes": 2})
+        after_clear = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual(after_clear["nodes"], [])
+        self.assertEqual(after_clear["edges"], [])
+        self.assertEqual(after_clear["notes"], [])
+        self.assertEqual(len(after_clear["chapters"]), 1)
+        self.assertEqual(len(after_clear["scenes"]), 1)
+        self.assertEqual(after_clear["scenes"][0]["content"], "Rain covers the old harbor.")
+
     def test_existing_database_gets_scene_link_migration(self):
         legacy_path = Path(self.temporary_directory.name) / "legacy.db"
         with sqlite3.connect(str(legacy_path)) as connection:

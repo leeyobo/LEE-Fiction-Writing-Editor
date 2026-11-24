@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v12-dynamic-canvas";
+const CACHE = "motu-shell-v13-clear-canvas";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

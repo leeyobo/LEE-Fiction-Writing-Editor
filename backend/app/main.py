@@ -255,7 +255,7 @@ class EdgeUpdate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.5.0",
+    version="0.6.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -273,7 +273,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.5.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.6.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -327,6 +327,26 @@ def get_project(project_id: str):
         "edges": [dict(row) for row in edges],
         "notes": [{**dict(row), "locked": bool(row["locked"])} for row in notes],
     }
+
+
+@app.delete("/api/projects/{project_id}/canvas", dependencies=[Depends(authorize)])
+def clear_project_canvas(project_id: str):
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        node_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM nodes WHERE project_id = ?", (project_id,)
+        ).fetchone()["count"]
+        edge_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM edges WHERE project_id = ?", (project_id,)
+        ).fetchone()["count"]
+        note_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM node_notes WHERE project_id = ?", (project_id,)
+        ).fetchone()["count"]
+        connection.execute("DELETE FROM nodes WHERE project_id = ?", (project_id,))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now(), project_id))
+    return {"nodes": node_count, "edges": edge_count, "notes": note_count}
 
 
 @app.post("/api/projects/{project_id}/chapters", status_code=201, dependencies=[Depends(authorize)])

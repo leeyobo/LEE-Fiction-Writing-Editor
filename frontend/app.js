@@ -363,6 +363,7 @@ function renderMinimap() {
 function renderMap() {
   if (!state.project) return;
   ensureCanvasState();
+  $("#clearCanvasButton").disabled = state.project.nodes.length === 0 && state.project.edges.length === 0;
   const chapterMap = new Map(state.project.chapters.map(chapter => [chapter.id, chapter.title]));
   const sceneMap = new Map(state.project.scenes.map(scene => [scene.id, scene.title]));
   $("#nodeLayer").innerHTML = state.project.nodes.map(node => {
@@ -1252,6 +1253,8 @@ function bindEvents() {
     if (action === "clear") clearCanvasSelection();
   });
   $("#emptyAddButton").addEventListener("click", () => addNode("plot", "rectangle"));
+  $("#clearCanvasButton").addEventListener("click", openClearCanvasDialog);
+  $("#confirmClearCanvasButton").addEventListener("click", clearProjectCanvas);
   $("#connectButton").addEventListener("click", event => {
     event.currentTarget.classList.toggle("active"); state.connectSourceId = null;
     event.currentTarget.innerHTML = event.currentTarget.classList.contains("active") ? '<span class="arrow-preview">→</span>选起点' : '<span class="arrow-preview">→</span>箭头';
@@ -1353,6 +1356,48 @@ async function createProject() {
     const project = await api("/api/projects", { method: "POST", body: JSON.stringify({ title, description: "" }) });
     state.projects.unshift(project); input.value = ""; $("#projectDialog").close(); await loadProject(project.id); toast("新作品已创建");
   } catch (error) { toast(error.message); }
+}
+
+function openClearCanvasDialog() {
+  if (!requireProject("清空画布")) return;
+  const nodes = state.project.nodes.length;
+  const edges = state.project.edges.length;
+  const notes = state.project.notes.length;
+  if (!nodes && !edges) { toast("当前画布已经是空的"); return; }
+  $("#clearCanvasSummary").textContent = `将删除 ${nodes} 个节点、${edges} 条连接线和 ${notes} 条便签。`;
+  $("#clearCanvasDialog").showModal();
+}
+
+async function clearProjectCanvas() {
+  if (!state.project) return;
+  const button = $("#confirmClearCanvasButton");
+  button.disabled = true;
+  button.textContent = "正在清空…";
+  try {
+    const result = await api(`/api/projects/${state.project.id}/canvas`, { method: "DELETE" });
+    state.project.nodes = [];
+    state.project.edges = [];
+    state.project.notes = [];
+    state.selectedNodeId = null; state.selectedNodeIds.clear();
+    state.selectedEdgeId = null; state.selectedEdgeIds.clear();
+    state.connectSourceId = null;
+    state.camera = { x: 0, y: 0 };
+    state.canvasAnchor = null;
+    state.canvasBounds = null;
+    state.canvasInitialized = false;
+    $("#connectButton").classList.remove("active");
+    $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
+    $(".inspector").classList.add("hidden");
+    $("#nodeQuickActions").hidden = true;
+    $("#clearCanvasDialog").close();
+    renderMap();
+    toast(`画布已清空：${result.nodes} 个节点、${result.edges} 条连接线`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "确认清空";
+  }
 }
 
 async function deleteCanvasSelection() {
