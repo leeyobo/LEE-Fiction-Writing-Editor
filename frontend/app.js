@@ -31,6 +31,7 @@ const state = {
   chapterTimer: null,
   nodeTimer: null,
   toastTimer: null,
+  find: { scope: "chapter", records: [], currentIndex: -1, query: "" },
 };
 
 const nodeTypeNames = { plot: "情节", character: "人物", place: "地点", conflict: "冲突", note: "便签" };
@@ -270,9 +271,12 @@ function editorBlockToMarkdown(node) {
   return inline();
 }
 
+function richContainerToMarkdown(container) {
+  return [...container.childNodes].map(editorBlockToMarkdown).join("\n\n").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
 function editorToMarkdown() {
-  const editor = $("#chapterContent");
-  return [...editor.childNodes].map(editorBlockToMarkdown).join("\n\n").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return richContainerToMarkdown($("#chapterContent"));
 }
 
 function editorSelection() {
@@ -389,6 +393,7 @@ function setShortcutPanel(open) {
   if (open) {
     setTypographyPanel(false);
     setBackgroundPanel(false);
+    setFindReplacePanel(false);
   }
   panel.hidden = !open;
   button.classList.toggle("active", open);
@@ -483,6 +488,7 @@ function setTypographyPanel(open) {
   if (open) {
     setShortcutPanel(false);
     setBackgroundPanel(false);
+    setFindReplacePanel(false);
   }
   panel.hidden = !open;
   button.classList.toggle("active", open);
@@ -560,11 +566,267 @@ function setBackgroundPanel(open) {
   if (open) {
     setShortcutPanel(false);
     setTypographyPanel(false);
+    setFindReplacePanel(false);
   }
   panel.hidden = !open;
   button.classList.toggle("active", open);
   button.setAttribute("aria-expanded", String(open));
   if (open) renderWritingAppearanceControls();
+}
+
+function findOptions() {
+  return {
+    caseSensitive: Boolean($("#findCaseSensitive")?.checked),
+    wholeWord: Boolean($("#findWholeWord")?.checked),
+  };
+}
+
+function isSearchWordCharacter(character = "") {
+  return Boolean(character) && /[\p{L}\p{N}_]/u.test(character);
+}
+
+function findTextOccurrences(text, query, options = findOptions()) {
+  if (!query) return [];
+  const source = options.caseSensitive ? String(text) : String(text).toLocaleLowerCase();
+  const needle = options.caseSensitive ? query : query.toLocaleLowerCase();
+  const matches = [];
+  let offset = 0;
+  while (offset <= source.length - needle.length) {
+    const index = source.indexOf(needle, offset);
+    if (index < 0) break;
+    const wholeWordMatch = !options.wholeWord || (
+      !isSearchWordCharacter(text[index - 1]) && !isSearchWordCharacter(text[index + query.length])
+    );
+    if (wholeWordMatch) matches.push(index);
+    offset = index + Math.max(needle.length, 1);
+  }
+  return matches;
+}
+
+function containerTextRanges(container, query = $("#findTextInput")?.value || "") {
+  if (!container || !query) return [];
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const segments = [];
+  let text = "";
+  let previousBlock = null;
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    let block = node.parentNode;
+    while (block?.parentNode && block.parentNode !== container) block = block.parentNode;
+    if (previousBlock && block !== previousBlock) text += "\n";
+    const start = text.length;
+    text += node.nodeValue || "";
+    segments.push({ node, start, end: text.length });
+    previousBlock = block;
+  }
+  return findTextOccurrences(text, query).map(start => {
+    const end = start + query.length;
+    const first = segments.find(segment => start >= segment.start && start < segment.end);
+    const last = [...segments].reverse().find(segment => end > segment.start && end <= segment.end);
+    if (!first || !last) return null;
+    const range = document.createRange();
+    range.setStart(first.node, start - first.start);
+    range.setEnd(last.node, end - last.start);
+    return range;
+  }).filter(Boolean);
+}
+
+function editorTextRanges(query = $("#findTextInput")?.value || "") {
+  return containerTextRanges($("#chapterContent"), query);
+}
+
+function markdownTextRanges(markdown, query = $("#findTextInput")?.value || "") {
+  const container = document.createElement("div");
+  container.innerHTML = markdownToEditorHtml(markdown || "");
+  return { container, ranges: containerTextRanges(container, query) };
+}
+
+function removeEmptyInlineFormatting(container) {
+  [...container.querySelectorAll("strong,b,em,i,u,del,s,strike,code,a")].reverse().forEach(element => {
+    if (!element.textContent && !element.querySelector("img")) element.remove();
+  });
+}
+
+function replaceVisibleMarkdownText(markdown, query, replacement) {
+  const { container, ranges } = markdownTextRanges(markdown, query);
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const range = ranges[index];
+    range.deleteContents();
+    range.insertNode(document.createTextNode(replacement));
+  }
+  removeEmptyInlineFormatting(container);
+  return { text: richContainerToMarkdown(container), count: ranges.length };
+}
+
+function clearFindHighlights() {
+  if (globalThis.CSS?.highlights) {
+    CSS.highlights.delete("motu-find-match");
+    CSS.highlights.delete("motu-find-current");
+  }
+}
+
+function collectFindRecords() {
+  const query = $("#findTextInput")?.value || "";
+  if (!query || !state.project) return [];
+  if (state.find.scope === "chapter") {
+    return editorTextRanges(query).map((_, localIndex) => ({ chapterId: state.activeChapterId, localIndex }));
+  }
+  return state.project.chapters.flatMap(chapter => {
+    const matches = markdownTextRanges(chapter.content || "", query).ranges;
+    return matches.map((_, localIndex) => ({ chapterId: chapter.id, localIndex }));
+  });
+}
+
+function currentFindRecord() {
+  return state.find.records[state.find.currentIndex] || null;
+}
+
+function renderFindHighlights(scrollCurrent = false) {
+  clearFindHighlights();
+  const query = $("#findTextInput")?.value || "";
+  if (!query) return;
+  const ranges = editorTextRanges(query);
+  const record = currentFindRecord();
+  const currentRange = record?.chapterId === state.activeChapterId ? ranges[record.localIndex] : null;
+  if (globalThis.Highlight && globalThis.CSS?.highlights) {
+    if (ranges.length) CSS.highlights.set("motu-find-match", new Highlight(...ranges));
+    if (currentRange) CSS.highlights.set("motu-find-current", new Highlight(currentRange));
+  }
+  if (scrollCurrent && currentRange) {
+    const target = currentRange.startContainer.parentElement;
+    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+function updateFindControls() {
+  const total = state.find.records.length;
+  const current = total ? state.find.currentIndex + 1 : 0;
+  $("#findMatchCounter").textContent = `${current} / ${total}`;
+  $("#findPreviousButton").disabled = total === 0;
+  $("#findNextButton").disabled = total === 0;
+  $("#replaceCurrentButton").disabled = total === 0;
+  const query = $("#findTextInput").value;
+  const activeMatches = query ? markdownTextRanges(activeChapter()?.content || "", query).ranges.length : 0;
+  const bookMatches = query && state.project ? state.project.chapters.reduce((sum, chapter) => sum + markdownTextRanges(chapter.content || "", query).ranges.length, 0) : 0;
+  $("#replaceChapterButton").disabled = activeMatches === 0;
+  $("#replaceBookButton").disabled = bookMatches === 0;
+}
+
+function refreshFindResults({ reset = false, scroll = false } = {}) {
+  const previous = currentFindRecord();
+  state.find.query = $("#findTextInput")?.value || "";
+  state.find.records = collectFindRecords();
+  if (!state.find.records.length) state.find.currentIndex = -1;
+  else if (reset) {
+    const activeIndex = state.find.records.findIndex(record => record.chapterId === state.activeChapterId);
+    state.find.currentIndex = activeIndex >= 0 ? activeIndex : 0;
+  } else {
+    const preservedIndex = previous ? state.find.records.findIndex(record => record.chapterId === previous.chapterId && record.localIndex === previous.localIndex) : -1;
+    state.find.currentIndex = preservedIndex >= 0 ? preservedIndex : Math.min(Math.max(state.find.currentIndex, 0), state.find.records.length - 1);
+  }
+  updateFindControls();
+  renderFindHighlights(scroll);
+}
+
+function activateCurrentFindRecord(scroll = true) {
+  const record = currentFindRecord();
+  if (!record) return;
+  if (record.chapterId !== state.activeChapterId) {
+    state.activeChapterId = record.chapterId;
+    localStorage.setItem("motu.activeChapterId", record.chapterId);
+    renderChapters();
+    renderEditor();
+    switchView("write");
+    requestAnimationFrame(() => renderFindHighlights(scroll));
+  } else renderFindHighlights(scroll);
+  updateFindControls();
+}
+
+function navigateFind(direction) {
+  if (!state.find.records.length) refreshFindResults({ reset: true });
+  if (!state.find.records.length) return;
+  state.find.currentIndex = (state.find.currentIndex + direction + state.find.records.length) % state.find.records.length;
+  activateCurrentFindRecord(true);
+}
+
+function setFindScope(scope) {
+  state.find.scope = scope === "book" ? "book" : "chapter";
+  $$("#findScopePicker [data-find-scope]").forEach(button => {
+    const active = button.dataset.findScope === state.find.scope;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  refreshFindResults({ reset: true });
+}
+
+function setFindReplacePanel(open, focusReplacement = false) {
+  const panel = $("#findReplacePanel");
+  const button = $("#findReplaceButton");
+  if (!panel || !button) return;
+  if (open) {
+    setShortcutPanel(false);
+    setTypographyPanel(false);
+    setBackgroundPanel(false);
+  }
+  panel.hidden = !open;
+  button.classList.toggle("active", open);
+  button.setAttribute("aria-expanded", String(open));
+  if (!open) {
+    clearFindHighlights();
+    return;
+  }
+  refreshFindResults({ reset: true });
+  requestAnimationFrame(() => (focusReplacement ? $("#replaceTextInput") : $("#findTextInput")).focus());
+}
+
+function replaceCurrentFindMatch() {
+  const record = currentFindRecord();
+  if (!record) return;
+  if (record.chapterId !== state.activeChapterId) {
+    activateCurrentFindRecord(false);
+    requestAnimationFrame(replaceCurrentFindMatch);
+    return;
+  }
+  const ranges = editorTextRanges($("#findTextInput").value);
+  const range = ranges[record.localIndex];
+  if (!range) return;
+  clearFindHighlights();
+  const replacement = document.createTextNode($("#replaceTextInput").value);
+  range.deleteContents();
+  range.insertNode(replacement);
+  range.setStartAfter(replacement);
+  range.collapse(true);
+  removeEmptyInlineFormatting($("#chapterContent"));
+  syncRichEditorChange();
+  refreshFindResults({ scroll: true });
+}
+
+async function replaceAcrossChapters(chapters, label) {
+  const query = $("#findTextInput").value;
+  if (!query || !chapters.length) return;
+  const replacement = $("#replaceTextInput").value;
+  const updates = chapters.map(chapter => {
+    const result = replaceVisibleMarkdownText(chapter.content || "", query, replacement);
+    return { chapter, ...result };
+  }).filter(update => update.count > 0);
+  const total = updates.reduce((sum, update) => sum + update.count, 0);
+  if (!total) { toast("没有可替换的匹配项"); return; }
+  clearTimeout(state.chapterTimer);
+  setSaveState("正在替换", "saving");
+  try {
+    const saved = await Promise.all(updates.map(update => api(`/api/chapters/${update.chapter.id}`, {
+      method: "PATCH", body: JSON.stringify({ title: update.chapter.title, content: update.text }),
+    })));
+    saved.forEach((chapter, index) => Object.assign(updates[index].chapter, chapter));
+    renderChapters();
+    renderEditor();
+    setSaveState("已同步", "saved");
+    refreshFindResults({ reset: true, scroll: true });
+    toast(`${label}完成，共替换 ${total} 处`);
+  } catch (error) {
+    setSaveState("替换失败", "error");
+    toast(error.message);
+  }
 }
 
 function handleMarkdownShortcut(event) {
@@ -982,12 +1244,14 @@ function selectChapter(chapterId) {
   renderChapters();
   renderEditor();
   switchView("write");
+  if (!$("#findReplacePanel")?.hidden) requestAnimationFrame(() => refreshFindResults({ reset: true }));
 }
 
 function switchView(view) {
   if ($("#shortcutPanel")) setShortcutPanel(false);
   if ($("#typographyPanel")) setTypographyPanel(false);
   if ($("#backgroundPanel")) setBackgroundPanel(false);
+  if (view === "map" && $("#findReplacePanel")) setFindReplacePanel(false);
   $$(".view-button").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   $$(".view-panel").forEach(panel => panel.classList.remove("active", "mobile-active"));
   const panel = view === "map" ? $("#mapView") : $("#writeView");
@@ -1661,7 +1925,11 @@ function bindEvents() {
   $("#deleteSelectedChaptersButton").addEventListener("click", () => openChapterDeleteDialog([...state.selectedChapterIds]));
   $("#confirmChapterDeleteButton").addEventListener("click", deletePendingChapters);
   $("#chapterTitleInput").addEventListener("input", queueDocumentSave);
-  $("#chapterContent").addEventListener("input", () => { resizeManuscript(); queueDocumentSave(); });
+  $("#chapterContent").addEventListener("input", () => {
+    resizeManuscript();
+    queueDocumentSave();
+    if (!$("#findReplacePanel").hidden) requestAnimationFrame(() => refreshFindResults());
+  });
   $("#chapterContent").addEventListener("keydown", handleMarkdownShortcut);
   $$(".format-tools [data-md-action]").forEach(button => {
     button.addEventListener("pointerdown", event => event.preventDefault());
@@ -1719,6 +1987,28 @@ function bindEvents() {
     saveWritingAppearance();
     toast("背景与稿纸设置已恢复默认");
   });
+  $("#findReplaceButton").addEventListener("click", event => {
+    event.stopPropagation();
+    setFindReplacePanel($("#findReplacePanel").hidden);
+  });
+  $("#closeFindReplacePanel").addEventListener("click", () => setFindReplacePanel(false));
+  $("#findTextInput").addEventListener("input", () => refreshFindResults({ reset: true }));
+  $("#findTextInput").addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    navigateFind(event.shiftKey ? -1 : 1);
+  });
+  $("#findScopePicker").addEventListener("click", event => {
+    const button = event.target.closest("[data-find-scope]");
+    if (button) setFindScope(button.dataset.findScope);
+  });
+  $("#findCaseSensitive").addEventListener("change", () => refreshFindResults({ reset: true }));
+  $("#findWholeWord").addEventListener("change", () => refreshFindResults({ reset: true }));
+  $("#findPreviousButton").addEventListener("click", () => navigateFind(-1));
+  $("#findNextButton").addEventListener("click", () => navigateFind(1));
+  $("#replaceCurrentButton").addEventListener("click", replaceCurrentFindMatch);
+  $("#replaceChapterButton").addEventListener("click", () => replaceAcrossChapters([activeChapter()], "本章替换"));
+  $("#replaceBookButton").addEventListener("click", () => replaceAcrossChapters(state.project?.chapters || [], "全书替换"));
   $("#nightModeButton").addEventListener("click", () => {
     writingAppearance.night = !writingAppearance.night;
     saveWritingAppearance();
@@ -1855,10 +2145,24 @@ function bindEvents() {
     if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
   });
   document.addEventListener("keydown", event => {
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && (event.code === "KeyF" || event.code === "KeyH")) {
+      event.preventDefault();
+      if (!$("#writeView").classList.contains("active")) switchView("write");
+      setFindReplacePanel(true, event.code === "KeyH");
+      return;
+    }
+    if (event.key === "F3" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      if ($("#findReplacePanel").hidden) setFindReplacePanel(true);
+      else navigateFind(event.shiftKey ? -1 : 1);
+      return;
+    }
     if (event.key !== "Escape") return;
     if (!$("#shortcutPanel").hidden) setShortcutPanel(false);
     if (!$("#typographyPanel").hidden) setTypographyPanel(false);
     if (!$("#backgroundPanel").hidden) setBackgroundPanel(false);
+    if (!$("#findReplacePanel").hidden) setFindReplacePanel(false);
   });
   window.addEventListener("resize", () => requestAnimationFrame(() => { applyCamera(); resizeManuscript(); }));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));

@@ -54,6 +54,7 @@
             <div class="format-tools" aria-label="文本工具">
               <button id="typographyButton" class="typography-button" type="button" title="字体与排版设置" aria-expanded="false" aria-controls="typographyPanel"><span class="typography-icon">T</span> 字体</button>
               <button id="backgroundButton" class="background-button" type="button" title="背景与稿纸设置" aria-expanded="false" aria-controls="backgroundPanel"><span aria-hidden="true">▧</span> 背景</button>
+              <button id="findReplaceButton" class="find-replace-button" type="button" title="查找与替换（Ctrl+F）" aria-expanded="false" aria-controls="findReplacePanel"><span aria-hidden="true">⌕</span> 查找替换</button>
               <span></span>
               <button type="button" data-md-action="bold" title="粗体（Ctrl+B）"><b>B</b></button>
               <button type="button" data-md-action="italic" title="斜体（Ctrl+I）"><i>I</i></button>
@@ -104,6 +105,32 @@
               <button id="resetBackgroundButton" class="reset-typography-button" type="button">恢复默认背景</button>
             </div>
             <p class="typography-footnote">背景、稿纸线和夜间模式只保存在当前设备。</p>
+          </aside>
+          <aside id="findReplacePanel" class="find-replace-panel" aria-label="查找与替换" hidden>
+            <div class="find-panel-heading"><div><p class="eyebrow">FIND &amp; REPLACE</p><h3>查找与替换</h3></div><button id="closeFindReplacePanel" type="button" aria-label="关闭查找与替换">×</button></div>
+            <div class="find-panel-body">
+              <label class="find-field"><span>查找</span><input id="findTextInput" type="search" placeholder="输入要查找的文字" autocomplete="off" /></label>
+              <label class="find-field"><span>替换</span><input id="replaceTextInput" type="text" placeholder="留空可删除匹配文字" autocomplete="off" /></label>
+              <div class="find-options">
+                <div id="findScopePicker" class="find-scope-picker" aria-label="查找范围">
+                  <button class="active" type="button" data-find-scope="chapter" aria-pressed="true">本章</button>
+                  <button type="button" data-find-scope="book" aria-pressed="false">全书</button>
+                </div>
+                <label><input id="findCaseSensitive" type="checkbox" /> 区分大小写</label>
+                <label><input id="findWholeWord" type="checkbox" /> 全词匹配</label>
+              </div>
+              <div class="find-navigation">
+                <button id="findPreviousButton" type="button" title="上一处（Shift+Enter）">上一处</button>
+                <strong id="findMatchCounter" aria-live="polite">0 / 0</strong>
+                <button id="findNextButton" type="button" title="下一处（Enter）">下一处</button>
+              </div>
+              <div class="replace-actions">
+                <button id="replaceCurrentButton" class="replace-primary" type="button">替换当前</button>
+                <button id="replaceChapterButton" type="button">本章全部替换</button>
+                <button id="replaceBookButton" type="button">全书全部替换</button>
+              </div>
+            </div>
+            <p class="find-panel-footnote">快捷键：Ctrl+F 查找，Ctrl+H 替换，Enter 下一处，Shift+Enter 上一处。</p>
           </aside>
           <article class="paper">
             <div class="paper-heading">
