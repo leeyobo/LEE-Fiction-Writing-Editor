@@ -70,6 +70,8 @@ const writingTypographyDefaults = {
   color: "#292b39", bold: false, paragraphSpacing: true, firstIndent: false,
 };
 let writingTypography = { ...writingTypographyDefaults };
+const writingAppearanceDefaults = { theme: "mist", guide: "none", night: false };
+let writingAppearance = { ...writingAppearanceDefaults };
 
 function normalizedServerUrl(value = state.config.serverUrl) {
   return value.trim().replace(/\/+$/, "");
@@ -384,7 +386,10 @@ function renderShortcutGroups(query = "") {
 function setShortcutPanel(open) {
   const panel = $("#shortcutPanel");
   const button = $("#shortcutHelpButton");
-  if (open) setTypographyPanel(false);
+  if (open) {
+    setTypographyPanel(false);
+    setBackgroundPanel(false);
+  }
   panel.hidden = !open;
   button.classList.toggle("active", open);
   button.setAttribute("aria-expanded", String(open));
@@ -426,6 +431,7 @@ function applyWritingTypography() {
   view.style.setProperty("--writing-font", writingFontStacks[writingTypography.fontFamily]);
   view.style.setProperty("--writing-size", `${writingTypography.fontSize}px`);
   view.style.setProperty("--writing-line-height", String(writingTypography.lineHeight));
+  view.style.setProperty("--writing-line-step", `${writingTypography.fontSize * writingTypography.lineHeight}px`);
   view.style.setProperty("--writing-width", `${writingTypography.width}px`);
   view.style.setProperty("--writing-color", writingTypography.color);
   view.style.setProperty("--writing-weight", writingTypography.bold ? "600" : "400");
@@ -474,11 +480,82 @@ function setTypographyPanel(open) {
   const panel = $("#typographyPanel");
   const button = $("#typographyButton");
   if (!panel || !button) return;
-  if (open) setShortcutPanel(false);
+  if (open) {
+    setShortcutPanel(false);
+    setBackgroundPanel(false);
+  }
   panel.hidden = !open;
   button.classList.toggle("active", open);
   button.setAttribute("aria-expanded", String(open));
   if (open) renderTypographyControls();
+}
+
+function normalizedWritingAppearance(value = {}) {
+  const themes = new Set(["mist", "eye", "parchment", "blue", "rose", "white"]);
+  const guides = new Set(["none", "solid", "dashed"]);
+  return {
+    theme: themes.has(value.theme) ? value.theme : writingAppearanceDefaults.theme,
+    guide: guides.has(value.guide) ? value.guide : writingAppearanceDefaults.guide,
+    night: Boolean(value.night),
+  };
+}
+
+function loadWritingAppearance() {
+  try {
+    writingAppearance = normalizedWritingAppearance(JSON.parse(localStorage.getItem("motu.writingAppearance") || "{}"));
+  } catch (_) {
+    writingAppearance = { ...writingAppearanceDefaults };
+  }
+  applyWritingAppearance();
+}
+
+function renderWritingAppearanceControls() {
+  $$("#backgroundThemePicker [data-writing-theme]").forEach(button => {
+    const active = button.dataset.writingTheme === writingAppearance.theme;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  $$("#guideStylePicker [data-guide-style]").forEach(button => {
+    const active = button.dataset.guideStyle === writingAppearance.guide;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const toggle = $("#nightModeToggle");
+  if (toggle) {
+    toggle.classList.toggle("active", writingAppearance.night);
+    toggle.setAttribute("aria-checked", String(writingAppearance.night));
+  }
+}
+
+function applyWritingAppearance() {
+  const view = $("#writeView");
+  if (!view) return;
+  ["mist", "eye", "parchment", "blue", "rose", "white"].forEach(theme => view.classList.remove(`theme-${theme}`));
+  ["none", "solid", "dashed"].forEach(guide => view.classList.remove(`guide-${guide}`));
+  view.classList.add(`theme-${writingAppearance.theme}`, `guide-${writingAppearance.guide}`);
+  $("#app").classList.toggle("night-mode", writingAppearance.night);
+  document.documentElement.style.colorScheme = writingAppearance.night ? "dark" : "light";
+  renderWritingAppearanceControls();
+}
+
+function saveWritingAppearance() {
+  writingAppearance = normalizedWritingAppearance(writingAppearance);
+  localStorage.setItem("motu.writingAppearance", JSON.stringify(writingAppearance));
+  applyWritingAppearance();
+}
+
+function setBackgroundPanel(open) {
+  const panel = $("#backgroundPanel");
+  const button = $("#backgroundButton");
+  if (!panel || !button) return;
+  if (open) {
+    setShortcutPanel(false);
+    setTypographyPanel(false);
+  }
+  panel.hidden = !open;
+  button.classList.toggle("active", open);
+  button.setAttribute("aria-expanded", String(open));
+  if (open) renderWritingAppearanceControls();
 }
 
 function handleMarkdownShortcut(event) {
@@ -517,6 +594,7 @@ function activeDocument() {
 
 async function boot() {
   loadWritingTypography();
+  loadWritingAppearance();
   bindEvents();
   $("#serverUrl").value = state.config.serverUrl;
   $("#apiKey").value = state.config.apiKey;
@@ -900,6 +978,7 @@ function selectChapter(chapterId) {
 function switchView(view) {
   if ($("#shortcutPanel")) setShortcutPanel(false);
   if ($("#typographyPanel")) setTypographyPanel(false);
+  if ($("#backgroundPanel")) setBackgroundPanel(false);
   $$(".view-button").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   $$(".view-panel").forEach(panel => panel.classList.remove("active", "mobile-active"));
   const panel = view === "map" ? $("#mapView") : $("#writeView");
@@ -1605,6 +1684,32 @@ function bindEvents() {
     saveWritingTypography();
     toast("已恢复默认排版");
   });
+  $("#backgroundButton").addEventListener("click", event => {
+    event.stopPropagation();
+    setBackgroundPanel($("#backgroundPanel").hidden);
+  });
+  $("#closeBackgroundPanel").addEventListener("click", () => setBackgroundPanel(false));
+  $("#nightModeToggle").addEventListener("click", () => {
+    writingAppearance.night = !writingAppearance.night;
+    saveWritingAppearance();
+  });
+  $("#backgroundThemePicker").addEventListener("click", event => {
+    const button = event.target.closest("[data-writing-theme]");
+    if (!button) return;
+    writingAppearance.theme = button.dataset.writingTheme;
+    saveWritingAppearance();
+  });
+  $("#guideStylePicker").addEventListener("click", event => {
+    const button = event.target.closest("[data-guide-style]");
+    if (!button) return;
+    writingAppearance.guide = button.dataset.guideStyle;
+    saveWritingAppearance();
+  });
+  $("#resetBackgroundButton").addEventListener("click", () => {
+    writingAppearance = { ...writingAppearanceDefaults };
+    saveWritingAppearance();
+    toast("背景与稿纸设置已恢复默认");
+  });
   $("#focusButton").addEventListener("click", () => $("#app").classList.toggle("focus-mode"));
   $("#editorMapButton").addEventListener("click", () => switchView("map"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
@@ -1733,6 +1838,7 @@ function bindEvents() {
     if (!event.target.closest("#canvasContextMenu")) $("#canvasContextMenu").hidden = true;
     if (!event.target.closest("#shortcutPanel") && !event.target.closest("#shortcutHelpButton")) setShortcutPanel(false);
     if (!event.target.closest("#typographyPanel") && !event.target.closest("#typographyButton")) setTypographyPanel(false);
+    if (!event.target.closest("#backgroundPanel") && !event.target.closest("#backgroundButton")) setBackgroundPanel(false);
     const inspector = $("#inspector");
     if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
   });
@@ -1740,6 +1846,7 @@ function bindEvents() {
     if (event.key !== "Escape") return;
     if (!$("#shortcutPanel").hidden) setShortcutPanel(false);
     if (!$("#typographyPanel").hidden) setTypographyPanel(false);
+    if (!$("#backgroundPanel").hidden) setBackgroundPanel(false);
   });
   window.addEventListener("resize", () => requestAnimationFrame(() => { applyCamera(); resizeManuscript(); }));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));

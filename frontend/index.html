@@ -53,6 +53,7 @@
           <div class="editor-toolbar">
             <div class="format-tools" aria-label="文本工具">
               <button id="typographyButton" class="typography-button" type="button" title="字体与排版设置" aria-expanded="false" aria-controls="typographyPanel"><span class="typography-icon">T</span> 字体</button>
+              <button id="backgroundButton" class="background-button" type="button" title="背景与稿纸设置" aria-expanded="false" aria-controls="backgroundPanel"><span aria-hidden="true">▧</span> 背景</button>
               <span></span>
               <button type="button" data-md-action="bold" title="粗体（Ctrl+B）"><b>B</b></button>
               <button type="button" data-md-action="italic" title="斜体（Ctrl+I）"><i>I</i></button>
@@ -82,6 +83,27 @@
               <button id="resetTypographyButton" class="reset-typography-button" type="button">恢复默认排版</button>
             </div>
             <p class="typography-footnote">排版偏好仅保存在当前设备，不会写入 Markdown 正文。</p>
+          </aside>
+          <aside id="backgroundPanel" class="background-panel" aria-label="背景与稿纸设置" hidden>
+            <div class="background-panel-heading"><div><p class="eyebrow">WRITING PAPER</p><h3>背景与稿纸</h3></div><button id="closeBackgroundPanel" type="button" aria-label="关闭背景设置">×</button></div>
+            <div class="background-controls">
+              <div class="night-mode-row"><div><strong>夜间模式</strong><small>降低暗光环境下的视觉刺激</small></div><button id="nightModeToggle" class="switch-toggle" type="button" role="switch" aria-checked="false"><span></span></button></div>
+              <section class="background-section"><div class="background-section-title"><strong>浅色纸张</strong><span>选择写作背景</span></div><div id="backgroundThemePicker" class="background-theme-picker">
+                <button type="button" data-writing-theme="mist" aria-label="薄雾灰"><i class="theme-swatch theme-mist"></i><span>薄雾灰</span></button>
+                <button type="button" data-writing-theme="eye" aria-label="护眼绿"><i class="theme-swatch theme-eye"></i><span>护眼绿</span></button>
+                <button type="button" data-writing-theme="parchment" aria-label="古典黄"><i class="theme-swatch theme-parchment"></i><span>古典黄</span></button>
+                <button type="button" data-writing-theme="blue" aria-label="静谧蓝"><i class="theme-swatch theme-blue"></i><span>静谧蓝</span></button>
+                <button type="button" data-writing-theme="rose" aria-label="浪漫粉"><i class="theme-swatch theme-rose"></i><span>浪漫粉</span></button>
+                <button type="button" data-writing-theme="white" aria-label="云笺白"><i class="theme-swatch theme-white"></i><span>云笺白</span></button>
+              </div></section>
+              <section class="background-section"><div class="background-section-title"><strong>稿纸线</strong><span>随字号和行高自动对齐</span></div><div id="guideStylePicker" class="guide-style-picker">
+                <button type="button" data-guide-style="none"><i class="guide-preview guide-none"></i><span>无</span></button>
+                <button type="button" data-guide-style="solid"><i class="guide-preview guide-solid"></i><span>实线</span></button>
+                <button type="button" data-guide-style="dashed"><i class="guide-preview guide-dashed"></i><span>虚线</span></button>
+              </div></section>
+              <button id="resetBackgroundButton" class="reset-typography-button" type="button">恢复默认背景</button>
+            </div>
+            <p class="typography-footnote">背景、稿纸线和夜间模式只保存在当前设备。</p>
           </aside>
           <article class="paper">
             <div class="paper-heading">

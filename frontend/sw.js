@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v21-font-size-50";
+const CACHE = "motu-shell-v22-background-night-mode";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
