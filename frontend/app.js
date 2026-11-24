@@ -57,6 +57,19 @@ const markdownShortcuts = [
   { category: "编辑与选择", name: "增加缩进", keys: ["Tab"], action: "indent" },
   { category: "编辑与选择", name: "减少缩进", keys: ["Shift", "Tab"], action: "outdent" },
 ];
+const writingFontStacks = {
+  serif: '"Noto Serif SC","Songti SC",serif',
+  songti: 'SimSun,"Songti SC",serif',
+  kaiti: 'KaiTi,"STKaiti",serif',
+  yahei: '"Microsoft YaHei","PingFang SC",sans-serif',
+  sans: 'Inter,"Microsoft YaHei","PingFang SC",sans-serif',
+  mono: 'Consolas,"Microsoft YaHei",monospace',
+};
+const writingTypographyDefaults = {
+  fontFamily: "serif", fontSize: 18, lineHeight: 2.05, width: 1040,
+  color: "#292b39", bold: false, paragraphSpacing: true, firstIndent: false,
+};
+let writingTypography = { ...writingTypographyDefaults };
 
 function normalizedServerUrl(value = state.config.serverUrl) {
   return value.trim().replace(/\/+$/, "");
@@ -371,6 +384,7 @@ function renderShortcutGroups(query = "") {
 function setShortcutPanel(open) {
   const panel = $("#shortcutPanel");
   const button = $("#shortcutHelpButton");
+  if (open) setTypographyPanel(false);
   panel.hidden = !open;
   button.classList.toggle("active", open);
   button.setAttribute("aria-expanded", String(open));
@@ -378,6 +392,93 @@ function setShortcutPanel(open) {
     renderShortcutGroups($("#shortcutSearch").value);
     requestAnimationFrame(() => $("#shortcutSearch").focus());
   }
+}
+
+function normalizedTypography(value = {}) {
+  const numberInRange = (candidate, fallback, minimum, maximum) => {
+    const number = Number(candidate);
+    return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
+  };
+  return {
+    fontFamily: writingFontStacks[value.fontFamily] ? value.fontFamily : writingTypographyDefaults.fontFamily,
+    fontSize: numberInRange(value.fontSize, writingTypographyDefaults.fontSize, 14, 28),
+    lineHeight: numberInRange(value.lineHeight, writingTypographyDefaults.lineHeight, 1.4, 2.8),
+    width: numberInRange(value.width, writingTypographyDefaults.width, 620, 1280),
+    color: /^#[0-9a-f]{6}$/i.test(value.color || "") ? value.color : writingTypographyDefaults.color,
+    bold: Boolean(value.bold),
+    paragraphSpacing: value.paragraphSpacing !== false,
+    firstIndent: Boolean(value.firstIndent),
+  };
+}
+
+function loadWritingTypography() {
+  try {
+    writingTypography = normalizedTypography(JSON.parse(localStorage.getItem("motu.writingTypography") || "{}"));
+  } catch (_) {
+    writingTypography = { ...writingTypographyDefaults };
+  }
+  applyWritingTypography();
+}
+
+function applyWritingTypography() {
+  const view = $("#writeView");
+  if (!view) return;
+  view.style.setProperty("--writing-font", writingFontStacks[writingTypography.fontFamily]);
+  view.style.setProperty("--writing-size", `${writingTypography.fontSize}px`);
+  view.style.setProperty("--writing-line-height", String(writingTypography.lineHeight));
+  view.style.setProperty("--writing-width", `${writingTypography.width}px`);
+  view.style.setProperty("--writing-color", writingTypography.color);
+  view.style.setProperty("--writing-weight", writingTypography.bold ? "600" : "400");
+  view.classList.toggle("compact-paragraphs", !writingTypography.paragraphSpacing);
+  view.classList.toggle("first-line-indent", writingTypography.firstIndent);
+  resizeManuscript();
+}
+
+function renderTypographyControls() {
+  $("#writingFontFamily").value = writingTypography.fontFamily;
+  $("#writingFontSize").value = writingTypography.fontSize;
+  $("#writingLineHeight").value = writingTypography.lineHeight;
+  $("#writingWidth").value = writingTypography.width;
+  $("#writingTextColor").value = writingTypography.color;
+  $("#writingParagraphSpacing").checked = writingTypography.paragraphSpacing;
+  $("#writingFirstIndent").checked = writingTypography.firstIndent;
+  $("#writingFontSizeValue").textContent = `${writingTypography.fontSize} px`;
+  $("#writingLineHeightValue").textContent = writingTypography.lineHeight.toFixed(2).replace(/0$/, "");
+  $("#writingWidthValue").textContent = `${writingTypography.width} px`;
+  $("#writingBoldToggle").classList.toggle("active", writingTypography.bold);
+  $("#writingBoldToggle").setAttribute("aria-pressed", String(writingTypography.bold));
+}
+
+function saveWritingTypography() {
+  writingTypography = normalizedTypography(writingTypography);
+  localStorage.setItem("motu.writingTypography", JSON.stringify(writingTypography));
+  applyWritingTypography();
+  renderTypographyControls();
+}
+
+function updateWritingTypographyFromControls() {
+  writingTypography = normalizedTypography({
+    ...writingTypography,
+    fontFamily: $("#writingFontFamily").value,
+    fontSize: $("#writingFontSize").value,
+    lineHeight: $("#writingLineHeight").value,
+    width: $("#writingWidth").value,
+    color: $("#writingTextColor").value,
+    paragraphSpacing: $("#writingParagraphSpacing").checked,
+    firstIndent: $("#writingFirstIndent").checked,
+  });
+  saveWritingTypography();
+}
+
+function setTypographyPanel(open) {
+  const panel = $("#typographyPanel");
+  const button = $("#typographyButton");
+  if (!panel || !button) return;
+  if (open) setShortcutPanel(false);
+  panel.hidden = !open;
+  button.classList.toggle("active", open);
+  button.setAttribute("aria-expanded", String(open));
+  if (open) renderTypographyControls();
 }
 
 function handleMarkdownShortcut(event) {
@@ -415,6 +516,7 @@ function activeDocument() {
 }
 
 async function boot() {
+  loadWritingTypography();
   bindEvents();
   $("#serverUrl").value = state.config.serverUrl;
   $("#apiKey").value = state.config.apiKey;
@@ -797,6 +899,7 @@ function selectChapter(chapterId) {
 
 function switchView(view) {
   if ($("#shortcutPanel")) setShortcutPanel(false);
+  if ($("#typographyPanel")) setTypographyPanel(false);
   $$(".view-button").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   $$(".view-panel").forEach(panel => panel.classList.remove("active", "mobile-active"));
   const panel = view === "map" ? $("#mapView") : $("#writeView");
@@ -1482,6 +1585,26 @@ function bindEvents() {
   });
   $("#closeShortcutPanel").addEventListener("click", () => setShortcutPanel(false));
   $("#shortcutSearch").addEventListener("input", event => renderShortcutGroups(event.currentTarget.value));
+  $("#typographyButton").addEventListener("click", event => {
+    event.stopPropagation();
+    setTypographyPanel($("#typographyPanel").hidden);
+  });
+  $("#closeTypographyPanel").addEventListener("click", () => setTypographyPanel(false));
+  ["#writingFontFamily", "#writingFontSize", "#writingLineHeight", "#writingWidth", "#writingTextColor"].forEach(selector => {
+    $(selector).addEventListener("input", updateWritingTypographyFromControls);
+  });
+  ["#writingParagraphSpacing", "#writingFirstIndent"].forEach(selector => {
+    $(selector).addEventListener("change", updateWritingTypographyFromControls);
+  });
+  $("#writingBoldToggle").addEventListener("click", () => {
+    writingTypography.bold = !writingTypography.bold;
+    saveWritingTypography();
+  });
+  $("#resetTypographyButton").addEventListener("click", () => {
+    writingTypography = { ...writingTypographyDefaults };
+    saveWritingTypography();
+    toast("已恢复默认排版");
+  });
   $("#focusButton").addEventListener("click", () => $("#app").classList.toggle("focus-mode"));
   $("#editorMapButton").addEventListener("click", () => switchView("map"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
@@ -1609,10 +1732,15 @@ function bindEvents() {
   document.addEventListener("pointerdown", event => {
     if (!event.target.closest("#canvasContextMenu")) $("#canvasContextMenu").hidden = true;
     if (!event.target.closest("#shortcutPanel") && !event.target.closest("#shortcutHelpButton")) setShortcutPanel(false);
+    if (!event.target.closest("#typographyPanel") && !event.target.closest("#typographyButton")) setTypographyPanel(false);
     const inspector = $("#inspector");
     if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
   });
-  document.addEventListener("keydown", event => { if (event.key === "Escape" && !$("#shortcutPanel").hidden) setShortcutPanel(false); });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    if (!$("#shortcutPanel").hidden) setShortcutPanel(false);
+    if (!$("#typographyPanel").hidden) setTypographyPanel(false);
+  });
   window.addEventListener("resize", () => requestAnimationFrame(() => { applyCamera(); resizeManuscript(); }));
   $$(".mobile-nav button").forEach(button => button.addEventListener("click", () => mobileNavigate(button.dataset.mobile)));
 }

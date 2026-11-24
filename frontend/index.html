@@ -52,6 +52,8 @@
         <section id="writeView" class="write-view view-panel">
           <div class="editor-toolbar">
             <div class="format-tools" aria-label="文本工具">
+              <button id="typographyButton" class="typography-button" type="button" title="字体与排版设置" aria-expanded="false" aria-controls="typographyPanel"><span class="typography-icon">T</span> 字体</button>
+              <span></span>
               <button type="button" data-md-action="bold" title="粗体（Ctrl+B）"><b>B</b></button>
               <button type="button" data-md-action="italic" title="斜体（Ctrl+I）"><i>I</i></button>
               <span></span>
@@ -67,6 +69,19 @@
             <label class="shortcut-search"><span>⌕</span><input id="shortcutSearch" type="search" placeholder="搜索名称、分类或组合键" autocomplete="off" /></label>
             <div id="shortcutGroups" class="shortcut-groups"></div>
             <p class="shortcut-footnote">仅在正文编辑区聚焦时生效；Windows 使用 Ctrl，macOS 可使用 Command。</p>
+          </aside>
+          <aside id="typographyPanel" class="typography-panel" aria-label="字体与排版设置" hidden>
+            <div class="typography-panel-heading"><div><p class="eyebrow">WRITING APPEARANCE</p><h3>字体与排版</h3></div><button id="closeTypographyPanel" type="button" aria-label="关闭字体设置">×</button></div>
+            <div class="typography-controls">
+              <label class="typography-field"><span>正文字体</span><select id="writingFontFamily"><option value="serif">书卷宋体（默认）</option><option value="songti">宋体</option><option value="kaiti">楷体</option><option value="yahei">微软雅黑</option><option value="sans">现代黑体</option><option value="mono">等宽字体</option></select></label>
+              <div class="typography-inline"><button id="writingBoldToggle" class="typography-toggle" type="button" aria-pressed="false"><b>B</b><span>整体加粗</span></button><label class="writing-color"><span>字色</span><input id="writingTextColor" type="color" value="#292b39" /></label></div>
+              <label class="typography-range"><span>字号 <output id="writingFontSizeValue">18 px</output></span><input id="writingFontSize" type="range" min="14" max="28" step="1" value="18" /></label>
+              <label class="typography-range"><span>行高 <output id="writingLineHeightValue">2.05</output></span><input id="writingLineHeight" type="range" min="1.4" max="2.8" step="0.05" value="2.05" /></label>
+              <label class="typography-range"><span>正文宽度 <output id="writingWidthValue">1040 px</output></span><input id="writingWidth" type="range" min="620" max="1280" step="20" value="1040" /></label>
+              <div class="typography-checks"><label><input id="writingParagraphSpacing" type="checkbox" checked />段间留白</label><label><input id="writingFirstIndent" type="checkbox" />首行缩进</label></div>
+              <button id="resetTypographyButton" class="reset-typography-button" type="button">恢复默认排版</button>
+            </div>
+            <p class="typography-footnote">排版偏好仅保存在当前设备，不会写入 Markdown 正文。</p>
           </aside>
           <article class="paper">
             <div class="paper-heading">
