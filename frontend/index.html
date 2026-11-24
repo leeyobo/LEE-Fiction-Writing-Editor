@@ -55,6 +55,8 @@
               <button id="typographyButton" class="typography-button" type="button" title="字体与排版设置" aria-expanded="false" aria-controls="typographyPanel"><span class="typography-icon">T</span> 字体</button>
               <button id="backgroundButton" class="background-button" type="button" title="背景与稿纸设置" aria-expanded="false" aria-controls="backgroundPanel"><span aria-hidden="true">▧</span> 背景</button>
               <button id="findReplaceButton" class="find-replace-button" type="button" title="查找与替换（Ctrl+F）" aria-expanded="false" aria-controls="findReplacePanel"><span aria-hidden="true">⌕</span> 查找替换</button>
+              <button id="undoButton" class="history-button" type="button" title="撤销（Ctrl+Z）" disabled>撤销</button>
+              <button id="redoButton" class="history-button" type="button" title="重做（Ctrl+Y / Ctrl+Shift+Z）" disabled>重做</button>
               <span></span>
               <button type="button" data-md-action="bold" title="粗体（Ctrl+B）"><b>B</b></button>
               <button type="button" data-md-action="italic" title="斜体（Ctrl+I）"><i>I</i></button>
@@ -64,7 +66,7 @@
               <button type="button" data-md-action="unorderedList" title="无序列表（Ctrl+Shift+]）">列表</button>
               <button type="button" data-md-action="inlineCode" title="行内代码（Ctrl+Shift+`）">代码</button>
             </div>
-            <div class="editor-meta"><button id="shortcutHelpButton" class="shortcut-help-button" type="button" aria-expanded="false" aria-controls="shortcutPanel">⌨ 快捷键</button><button id="editorMapButton" class="editor-map-button" type="button">故事地图</button><span id="chapterWords">0 字</span><span>Markdown</span></div>
+            <div class="editor-meta"><button id="shortcutHelpButton" class="shortcut-help-button" type="button" aria-expanded="false" aria-controls="shortcutPanel">⌨ 快捷键</button><button id="splitViewButton" class="split-view-button" type="button" aria-pressed="false" aria-controls="splitPane">分栏</button><button id="editorMapButton" class="editor-map-button" type="button">故事地图</button><span id="chapterWords">0 字</span><span>Markdown</span></div>
           </div>
           <aside id="shortcutPanel" class="shortcut-panel" aria-label="Typora 风格快捷键" hidden>
             <div class="shortcut-panel-heading"><div><p class="eyebrow">MARKDOWN SHORTCUTS</p><h3>Typora 风格快捷键</h3></div><button id="closeShortcutPanel" type="button" aria-label="关闭快捷键窗口">×</button></div>
@@ -148,6 +150,19 @@
             </div>
             <div id="chapterContent" class="manuscript" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="从这里开始写作…" spellcheck="false"></div>
           </article>
+          <div id="splitPaneResizer" class="split-pane-resizer" role="separator" aria-orientation="vertical" aria-label="调整分栏宽度" tabindex="0" hidden></div>
+          <aside id="splitPane" class="split-pane" aria-label="章节参考分栏" hidden>
+            <div class="split-pane-heading">
+              <div><p class="eyebrow">REFERENCE</p><h3>章节参考</h3></div>
+              <button id="closeSplitPane" type="button" aria-label="关闭分栏">×</button>
+            </div>
+            <label class="split-chapter-picker"><span>参考章节</span><select id="splitChapterSelect" aria-label="选择参考章节"></select></label>
+            <article class="split-document">
+              <span id="splitChapterIndex" class="chapter-index">CHAPTER 01</span>
+              <h2 id="splitChapterTitle">第一章</h2>
+              <div id="splitChapterContent" class="split-chapter-content"></div>
+            </article>
+          </aside>
         </section>
 
         <section id="mapView" class="map-view view-panel active">

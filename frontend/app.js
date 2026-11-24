@@ -31,6 +31,10 @@ const state = {
   chapterTimer: null,
   nodeTimer: null,
   toastTimer: null,
+  editorHistories: new Map(),
+  editorHistoryTimer: null,
+  applyingEditorHistory: false,
+  split: { open: false, chapterId: null, width: 390 },
   find: { scope: "chapter", records: [], currentIndex: -1, query: "" },
 };
 
@@ -53,6 +57,8 @@ const markdownShortcuts = [
   { category: "段落结构", name: "无序列表", keys: ["Ctrl", "Shift", "]"], action: "unorderedList" },
   { category: "段落结构", name: "表格", keys: ["Ctrl", "T"], action: "table" },
   { category: "编辑与选择", name: "保存", keys: ["Ctrl", "S"], action: "save" },
+  { category: "编辑与选择", name: "撤销", keys: ["Ctrl", "Z"], action: "undo" },
+  { category: "编辑与选择", name: "重做", keys: ["Ctrl", "Y"], action: "redo" },
   { category: "编辑与选择", name: "选择当前行", keys: ["Ctrl", "L"], action: "selectLine" },
   { category: "编辑与选择", name: "选择当前词", keys: ["Ctrl", "D"], action: "selectWord" },
   { category: "编辑与选择", name: "增加缩进", keys: ["Tab"], action: "indent" },
@@ -330,7 +336,210 @@ function wrapRichSelection(tag, placeholder) {
 
 function syncRichEditorChange() {
   resizeManuscript();
+  scheduleEditorHistory();
   queueDocumentSave();
+  renderSplitPane();
+}
+
+function chapterSnapshot(chapter = activeChapter(), fromEditor = false) {
+  if (!chapter) return null;
+  return {
+    title: fromEditor ? ($("#chapterTitleInput").value.trim() || "未命名章节") : chapter.title,
+    content: fromEditor ? editorToMarkdown() : (chapter.content || ""),
+  };
+}
+
+function sameSnapshot(left, right) {
+  return Boolean(left && right && left.title === right.title && left.content === right.content);
+}
+
+function ensureEditorHistory(chapter = activeChapter()) {
+  if (!chapter) return null;
+  if (!state.editorHistories.has(chapter.id)) {
+    state.editorHistories.set(chapter.id, { entries: [chapterSnapshot(chapter)], index: 0 });
+  }
+  return state.editorHistories.get(chapter.id);
+}
+
+function commitEditorHistory(chapterId, snapshot) {
+  const chapter = state.project?.chapters.find(item => item.id === chapterId);
+  if (!chapter || !snapshot) return;
+  const history = ensureEditorHistory(chapter);
+  if (sameSnapshot(history.entries[history.index], snapshot)) {
+    updateHistoryButtons();
+    return;
+  }
+  history.entries.splice(history.index + 1);
+  history.entries.push({ ...snapshot });
+  if (history.entries.length > 100) history.entries.shift();
+  history.index = history.entries.length - 1;
+  updateHistoryButtons();
+}
+
+function flushEditorHistory() {
+  clearTimeout(state.editorHistoryTimer);
+  state.editorHistoryTimer = null;
+  if (state.applyingEditorHistory) return;
+  const chapter = activeChapter();
+  if (chapter) commitEditorHistory(chapter.id, chapterSnapshot(chapter, true));
+}
+
+function scheduleEditorHistory() {
+  if (state.applyingEditorHistory) return;
+  clearTimeout(state.editorHistoryTimer);
+  const chapterId = state.activeChapterId;
+  state.editorHistoryTimer = setTimeout(() => {
+    state.editorHistoryTimer = null;
+    if (state.activeChapterId === chapterId) flushEditorHistory();
+  }, 420);
+}
+
+function updateHistoryButtons() {
+  const history = state.editorHistories.get(state.activeChapterId);
+  const undo = $("#undoButton");
+  const redo = $("#redoButton");
+  if (!undo || !redo) return;
+  undo.disabled = !history || history.index <= 0;
+  redo.disabled = !history || history.index >= history.entries.length - 1;
+}
+
+function placeCaretAtEditorEnd() {
+  const editor = $("#chapterContent");
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function applyEditorHistorySnapshot(snapshot) {
+  const chapter = activeChapter();
+  if (!chapter || !snapshot) return;
+  state.applyingEditorHistory = true;
+  chapter.title = snapshot.title;
+  chapter.content = snapshot.content;
+  $("#chapterTitleInput").value = snapshot.title;
+  $("#chapterContent").innerHTML = markdownToEditorHtml(snapshot.content);
+  $("#chapterWords").textContent = wordCount(snapshot.content) + " 字";
+  renderChapters();
+  renderLinkedNodes();
+  renderSplitPane();
+  resizeManuscript();
+  queueDocumentSave();
+  $("#chapterContent").focus();
+  placeCaretAtEditorEnd();
+  state.applyingEditorHistory = false;
+  updateHistoryButtons();
+}
+
+function moveEditorHistory(direction) {
+  flushEditorHistory();
+  const history = ensureEditorHistory();
+  if (!history) return;
+  const nextIndex = history.index + direction;
+  if (nextIndex < 0 || nextIndex >= history.entries.length) return;
+  history.index = nextIndex;
+  applyEditorHistorySnapshot(history.entries[history.index]);
+}
+
+function loadSplitViewLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("motu.splitView") || "null");
+    if (saved && typeof saved === "object") {
+      state.split.open = Boolean(saved.open);
+      state.split.chapterId = saved.chapterId || null;
+      state.split.width = Math.max(300, Math.min(720, Number(saved.width) || 390));
+    }
+  } catch (_error) {
+    state.split = { open: false, chapterId: null, width: 390 };
+  }
+  $("#writeView").style.setProperty("--split-pane-width", state.split.width + "px");
+}
+
+function saveSplitViewLayout() {
+  localStorage.setItem("motu.splitView", JSON.stringify(state.split));
+}
+
+function defaultSplitChapterId() {
+  const chapters = state.project?.chapters || [];
+  return chapters.find(chapter => chapter.id !== state.activeChapterId)?.id || chapters[0]?.id || null;
+}
+
+function renderSplitChapterOptions() {
+  const select = $("#splitChapterSelect");
+  if (!select || !state.project) return;
+  if (!state.project.chapters.some(chapter => chapter.id === state.split.chapterId)) {
+    state.split.chapterId = defaultSplitChapterId();
+  }
+  select.innerHTML = state.project.chapters.map((chapter, index) => (
+    `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`
+  )).join("");
+  select.value = state.split.chapterId || "";
+}
+
+function renderSplitPane() {
+  if (!state.project) return;
+  renderSplitChapterOptions();
+  const chapter = state.project.chapters.find(item => item.id === state.split.chapterId);
+  if (!chapter) return;
+  const index = state.project.chapters.indexOf(chapter) + 1;
+  const content = chapter.id === state.activeChapterId ? editorToMarkdown() : (chapter.content || "");
+  $("#splitChapterIndex").textContent = `CHAPTER ${String(index).padStart(2, "0")}`;
+  $("#splitChapterTitle").textContent = chapter.id === state.activeChapterId ? ($("#chapterTitleInput").value.trim() || chapter.title) : chapter.title;
+  $("#splitChapterContent").innerHTML = content ? markdownToEditorHtml(content) : "<p class=\"split-empty\">这个章节还没有正文。</p>";
+}
+
+function setSplitView(open) {
+  state.split.open = Boolean(open);
+  const pane = $("#splitPane");
+  const resizer = $("#splitPaneResizer");
+  const button = $("#splitViewButton");
+  const view = $("#writeView");
+  view.classList.toggle("split-active", state.split.open);
+  pane.hidden = !state.split.open;
+  resizer.hidden = !state.split.open;
+  button.classList.toggle("active", state.split.open);
+  button.setAttribute("aria-pressed", String(state.split.open));
+  if (state.split.open) {
+    if (view.clientWidth) setSplitPaneWidth(state.split.width);
+    renderSplitPane();
+  }
+  saveSplitViewLayout();
+}
+
+function setSplitPaneWidth(width) {
+  const view = $("#writeView");
+  const max = Math.max(320, Math.min(720, view.clientWidth * .62));
+  state.split.width = Math.round(Math.max(300, Math.min(max, width)));
+  view.style.setProperty("--split-pane-width", state.split.width + "px");
+}
+
+function bindSplitPaneResizer() {
+  const resizer = $("#splitPaneResizer");
+  resizer.addEventListener("pointerdown", event => {
+    if (window.matchMedia("(max-width: 680px)").matches) return;
+    event.preventDefault();
+    resizer.setPointerCapture(event.pointerId);
+    resizer.classList.add("dragging");
+    const move = moveEvent => setSplitPaneWidth($("#writeView").getBoundingClientRect().right - moveEvent.clientX);
+    const finish = () => {
+      resizer.classList.remove("dragging");
+      resizer.removeEventListener("pointermove", move);
+      resizer.removeEventListener("pointerup", finish);
+      resizer.removeEventListener("pointercancel", finish);
+      saveSplitViewLayout();
+    };
+    resizer.addEventListener("pointermove", move);
+    resizer.addEventListener("pointerup", finish);
+    resizer.addEventListener("pointercancel", finish);
+  });
+  resizer.addEventListener("keydown", event => {
+    if (!state.split.open || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    setSplitPaneWidth(state.split.width + (event.key === "ArrowLeft" ? 20 : -20));
+    saveSplitViewLayout();
+  });
 }
 
 function applyMarkdownAction(action) {
@@ -907,6 +1116,7 @@ function replaceCurrentFindMatch() {
 async function replaceAcrossChapters(chapters, label) {
   const query = $("#findTextInput").value;
   if (!query || !chapters.length) return;
+  flushEditorHistory();
   const replacement = $("#replaceTextInput").value;
   const updates = chapters.map(chapter => {
     const result = replaceVisibleMarkdownText(chapter.content || "", query, replacement);
@@ -914,13 +1124,17 @@ async function replaceAcrossChapters(chapters, label) {
   }).filter(update => update.count > 0);
   const total = updates.reduce((sum, update) => sum + update.count, 0);
   if (!total) { toast("没有可替换的匹配项"); return; }
+  updates.forEach(update => ensureEditorHistory(update.chapter));
   clearTimeout(state.chapterTimer);
   setSaveState("正在替换", "saving");
   try {
     const saved = await Promise.all(updates.map(update => api(`/api/chapters/${update.chapter.id}`, {
       method: "PATCH", body: JSON.stringify({ title: update.chapter.title, content: update.text }),
     })));
-    saved.forEach((chapter, index) => Object.assign(updates[index].chapter, chapter));
+    saved.forEach((chapter, index) => {
+      Object.assign(updates[index].chapter, chapter);
+      commitEditorHistory(chapter.id, chapterSnapshot(chapter));
+    });
     renderChapters();
     renderEditor();
     setSaveState("已同步", "saved");
@@ -934,6 +1148,16 @@ async function replaceAcrossChapters(chapters, label) {
 
 function handleMarkdownShortcut(event) {
   const mod = event.ctrlKey || event.metaKey;
+  if (mod && event.code === "KeyZ") {
+    event.preventDefault();
+    moveEditorHistory(event.shiftKey ? 1 : -1);
+    return;
+  }
+  if (mod && !event.shiftKey && event.code === "KeyY") {
+    event.preventDefault();
+    moveEditorHistory(1);
+    return;
+  }
   let action = null;
   if (event.key === "Tab" && !mod && !event.altKey) action = event.shiftKey ? "outdent" : "indent";
   else if (event.altKey && event.shiftKey && event.code === "Digit5") action = "strike";
@@ -970,6 +1194,7 @@ async function boot() {
   loadWritingTypography();
   loadWritingAppearance();
   loadFindPanelLayout();
+  loadSplitViewLayout();
   bindEvents();
   $("#serverUrl").value = state.config.serverUrl;
   $("#apiKey").value = state.config.apiKey;
@@ -1000,6 +1225,9 @@ async function connect() {
 
 async function loadProject(projectId) {
   setSaveState("正在载入", "saving");
+  clearTimeout(state.editorHistoryTimer);
+  state.editorHistoryTimer = null;
+  state.editorHistories.clear();
   state.project = await api(`/api/projects/${projectId}`);
   state.project.notes ||= [];
   localStorage.setItem("motu.projectId", projectId);
@@ -1030,6 +1258,8 @@ function renderAll() {
   renderEditor();
   renderMap();
   renderChapterOptions();
+  renderSplitChapterOptions();
+  setSplitView(state.split.open);
 }
 
 function chapterMatchesFilter(chapter, filter) {
@@ -1070,6 +1300,7 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
 function renderEditor() {
   const chapter = activeChapter();
   if (!chapter) return;
+  ensureEditorHistory(chapter);
   const chapterIndex = state.project.chapters.indexOf(chapter) + 1;
   $("#chapterIndex").textContent = `CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
   $("#chapterSubtitle").textContent = "在安静里，把故事写下来。";
@@ -1077,6 +1308,7 @@ function renderEditor() {
   $("#chapterContent").innerHTML = markdownToEditorHtml(chapter.content);
   $("#chapterWords").textContent = `${wordCount(chapter.content)} 字`;
   renderLinkedNodes();
+  updateHistoryButtons();
   requestAnimationFrame(resizeManuscript);
 }
 
@@ -1343,10 +1575,12 @@ function connectorPath(source, target, sourcePort, targetPort) {
 
 function selectChapter(chapterId) {
   if (!state.project?.chapters.some(chapter => chapter.id === chapterId)) return;
+  if (state.activeChapterId !== chapterId) flushEditorHistory();
   state.activeChapterId = chapterId;
   localStorage.setItem("motu.activeChapterId", chapterId);
   renderChapters();
   renderEditor();
+  renderSplitPane();
   switchView("write");
   if (!$("#findReplacePanel")?.hidden) requestAnimationFrame(() => refreshFindResults({ reset: true }));
 }
@@ -1365,6 +1599,8 @@ function switchView(view) {
   if (view === "map") {
     $(".inspector").classList.add("hidden");
     requestAnimationFrame(renderMap);
+  } else if (state.split.open) {
+    requestAnimationFrame(() => setSplitPaneWidth(state.split.width));
   }
 }
 
@@ -1375,6 +1611,7 @@ function queueDocumentSave() {
   document.content = editorToMarkdown();
   $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
   renderChapters();
+  renderSplitPane();
   setSaveState("保存中", "saving");
   clearTimeout(state.chapterTimer);
   state.chapterTimer = setTimeout(async () => {
@@ -2028,13 +2265,27 @@ function bindEvents() {
   });
   $("#deleteSelectedChaptersButton").addEventListener("click", () => openChapterDeleteDialog([...state.selectedChapterIds]));
   $("#confirmChapterDeleteButton").addEventListener("click", deletePendingChapters);
-  $("#chapterTitleInput").addEventListener("input", queueDocumentSave);
-  $("#chapterContent").addEventListener("input", () => {
-    resizeManuscript();
+  $("#chapterTitleInput").addEventListener("input", () => {
+    scheduleEditorHistory();
     queueDocumentSave();
+  });
+  $("#chapterTitleInput").addEventListener("keydown", event => {
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.code === "KeyZ") {
+      event.preventDefault();
+      moveEditorHistory(event.shiftKey ? 1 : -1);
+    } else if (mod && !event.shiftKey && event.code === "KeyY") {
+      event.preventDefault();
+      moveEditorHistory(1);
+    }
+  });
+  $("#chapterContent").addEventListener("input", () => {
+    syncRichEditorChange();
     if (!$("#findReplacePanel").hidden) requestAnimationFrame(() => refreshFindResults());
   });
   $("#chapterContent").addEventListener("keydown", handleMarkdownShortcut);
+  $("#undoButton").addEventListener("click", () => moveEditorHistory(-1));
+  $("#redoButton").addEventListener("click", () => moveEditorHistory(1));
   $$(".format-tools [data-md-action]").forEach(button => {
     button.addEventListener("pointerdown", event => event.preventDefault());
     button.addEventListener("click", () => applyMarkdownAction(button.dataset.mdAction));
@@ -2130,6 +2381,17 @@ function bindEvents() {
   $("#nightModeButton").addEventListener("click", () => {
     writingAppearance.night = !writingAppearance.night;
     saveWritingAppearance();
+  });
+  $("#splitViewButton").addEventListener("click", () => setSplitView(!state.split.open));
+  $("#closeSplitPane").addEventListener("click", () => setSplitView(false));
+  $("#splitChapterSelect").addEventListener("change", event => {
+    state.split.chapterId = event.currentTarget.value || null;
+    renderSplitPane();
+    saveSplitViewLayout();
+  });
+  bindSplitPaneResizer();
+  window.addEventListener("resize", () => {
+    if (state.split.open && $("#writeView").classList.contains("active")) setSplitPaneWidth(state.split.width);
   });
   $("#editorMapButton").addEventListener("click", () => switchView("map"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
@@ -2375,6 +2637,7 @@ async function deletePendingChapters() {
       body: JSON.stringify({ chapter_ids: ids }),
     });
     const deleted = new Set(ids);
+    ids.forEach(id => state.editorHistories.delete(id));
     state.project.chapters = state.project.chapters.filter(chapter => !deleted.has(chapter.id));
     state.project.chapters.forEach((chapter, position) => { chapter.position = position; });
     state.project.nodes.forEach(node => { if (deleted.has(node.chapter_id)) node.chapter_id = null; });
@@ -2383,6 +2646,7 @@ async function deletePendingChapters() {
       state.activeChapterId = state.project.chapters[0].id;
       localStorage.setItem("motu.activeChapterId", state.activeChapterId);
     }
+    if (deleted.has(state.split.chapterId)) state.split.chapterId = defaultSplitChapterId();
     state.chapterBulkMode = false;
     state.selectedChapterIds.clear();
     state.pendingChapterDeleteIds = [];
