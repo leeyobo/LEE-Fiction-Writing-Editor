@@ -70,7 +70,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .volume-label { display: flex; justify-content: space-between; padding: 0 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .chapter-list { list-style: none; padding: 0; margin: 0; overflow: auto; }
 .chapter-group { list-style: none; margin: 0 0 4px; }
-.chapter-item { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; min-height: 56px; margin-bottom: 4px; padding: 7px 9px; border-radius: 11px; cursor: pointer; }
+.chapter-item { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; min-height: 50px; margin-bottom: 4px; padding: 7px 9px; border-radius: 11px; cursor: pointer; }
 .chapter-item.bulk-select { grid-template-columns: 18px 30px 1fr 42px; }
 .chapter-item:hover { background: var(--soft); }
 .chapter-item.active { background: #e6f0ff; color: #123b78; }
@@ -80,7 +80,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .chapter-item.active .chapter-number { background: var(--accent); color: white; }
 .chapter-copy { min-width: 0; }
 .chapter-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.chapter-copy small, .chapter-words { color: var(--muted); font-size: 11px; }
+.chapter-words { color: var(--muted); font-size: 11px; }
 .chapter-trailing { position: relative; display: grid; place-items: center end; width: 42px; min-height: 30px; }
 .chapter-delete-button { position: absolute; right: 0; padding: 5px 6px; border: 1px solid #efb8c0; border-radius: 7px; color: #bd3548; background: #fff8f9; opacity: 0; pointer-events: none; cursor: pointer; font-size: 11px; transition: opacity .14s ease; }
 .chapter-item:not(.bulk-select):hover .chapter-words, .chapter-item:not(.bulk-select):focus-within .chapter-words { opacity: 0; }
@@ -529,7 +529,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .chapter-item:hover { background: #202d42; }
 .night-mode .chapter-item.active { color: #e8f1ff; background: #2a3c59; box-shadow: inset 3px 0 0 #60a5fa; }
 .night-mode .chapter-item.active .chapter-copy strong { color: #f8fafc; }
-.night-mode .chapter-item.active .chapter-copy small, .night-mode .chapter-item.active .chapter-words { color: #bdcbe0; }
+.night-mode .chapter-item.active .chapter-words { color: #bdcbe0; }
 .night-mode .chapter-number { color: #b4c0d1; background: #263348; }
 .night-mode .chapter-item.active .chapter-number { color: #0f172a; background: #93c5fd; }
 .night-mode .night-mode-button { color: #cbd5e1; border-color: #415069; background: #1b2738; }

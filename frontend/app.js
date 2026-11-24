@@ -1282,7 +1282,7 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
       <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
         ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
         <span class="chapter-number">${String(index).padStart(2, "0")}</span>
-        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong><small>${chapter.content ? escapeHtml(markdownPlainText(chapter.content).slice(0, 18)) : "还没有正文"}</small></span>
+        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong></span>
         <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-delete-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
       </div>
     </li>`;
