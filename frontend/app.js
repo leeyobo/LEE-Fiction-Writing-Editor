@@ -25,6 +25,7 @@ const state = {
   canvasAnchor: null,
   canvasBounds: null,
   canvasInitialized: false,
+  canvasControlScheme: localStorage.getItem("motu.canvasControlScheme") === "classic" ? "classic" : "mixed",
   panMode: localStorage.getItem("motu.canvasPanMode") === "locked",
   spacePressed: false,
   ignoreCanvasClick: false,
@@ -2126,12 +2127,35 @@ function setCanvasInteractionMode(locked, announce = false) {
   button.textContent = state.panMode ? "退出锁定" : "锁定抓手";
   button.title = state.panMode ? "退出后可同时拖动画布和操作图形" : "锁定后可从图形上直接拖动画布";
   localStorage.setItem("motu.canvasPanMode", state.panMode ? "locked" : "mixed");
-  if (announce) toast(state.panMode ? "已锁定抓手：拖动任意位置都将平移画布" : "已开启导航与编辑并存模式");
+  if (announce) {
+    const unlockedMessage = state.canvasControlScheme === "classic" ? "已退出锁定抓手，恢复经典框选操作" : "已开启导航与编辑并存模式";
+    toast(state.panMode ? "已锁定抓手：拖动任意位置都将平移画布" : unlockedMessage);
+  }
+}
+
+function setCanvasControlScheme(scheme, announce = false) {
+  const nextScheme = scheme === "classic" ? "classic" : "mixed";
+  const changed = state.canvasControlScheme !== nextScheme;
+  state.canvasControlScheme = nextScheme;
+  if (changed && state.panMode) setCanvasInteractionMode(false);
+  const classic = state.canvasControlScheme === "classic";
+  const viewport = $("#mapViewport");
+  const button = $("#classicInteractionToggle");
+  viewport.classList.toggle("classic-controls", classic);
+  button.classList.toggle("active", classic);
+  button.setAttribute("aria-checked", String(classic));
+  button.title = classic ? "关闭后恢复空白处直接拖动画布" : "开启后恢复原来的空白拖动框选方式";
+  $("#mapHelpText").textContent = classic
+    ? "经典操作 · 空白处拖动框选 · 开启抓手或按住空格/中键拖动画布 · 图形可直接操作"
+    : "空白处拖动画布 · 图形可直接操作 · Shift+拖动框选 · 空格/中键临时抓手 · 滚轮平移";
+  localStorage.setItem("motu.canvasControlScheme", state.canvasControlScheme);
+  if (announce) toast(classic ? "已切换为经典操作方式" : "已切换为导航与编辑并存方式");
 }
 
 function bindMinimapInteractions() {
   const viewport = $("#mapViewport"); const panel = $("#minimapPanel"); const handle = $("#minimapHandle"); const svg = $("#minimapSvg");
   setCanvasInteractionMode(state.panMode);
+  setCanvasControlScheme(state.canvasControlScheme);
   try {
     const saved = JSON.parse(localStorage.getItem("motu.minimapPosition") || "null");
     if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
@@ -2179,6 +2203,10 @@ function bindMinimapInteractions() {
     event.stopPropagation();
     setCanvasInteractionMode(!state.panMode, true);
   });
+  $("#classicInteractionToggle").addEventListener("click", event => {
+    event.stopPropagation();
+    setCanvasControlScheme(state.canvasControlScheme === "classic" ? "mixed" : "classic", true);
+  });
   viewport.addEventListener("wheel", event => {
     if (event.target.closest(".minimap-panel")) return;
     event.preventDefault(); panCanvasBy(-event.deltaX, -event.deltaY);
@@ -2201,7 +2229,8 @@ function bindCanvasSelection() {
     if (event.button !== 0) return;
     const interactiveTarget = event.target.closest("button, .story-node, .node-quick-actions, .canvas-context-menu, .map-empty, .minimap-panel, [data-edge-id]");
     if (interactiveTarget) return;
-    if (!event.shiftKey) { startCanvasPan(event); return; }
+    const shouldRegionSelect = state.canvasControlScheme === "classic" || event.shiftKey;
+    if (!shouldRegionSelect) { startCanvasPan(event); return; }
     const bounds = viewport.getBoundingClientRect();
     const start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top, clientX: event.clientX, clientY: event.clientY };
     state.selectionDrag = { start, current: start };

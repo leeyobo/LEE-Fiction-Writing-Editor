@@ -167,9 +167,9 @@
 
         <section id="mapView" class="map-view view-panel active">
           <div class="map-toolbar">
-            <div>
-              <p class="eyebrow">STORY MAP</p>
-              <h2>流程画布</h2>
+            <div class="map-toolbar-heading">
+              <div><p class="eyebrow">STORY MAP</p><h2>流程画布</h2></div>
+              <button id="classicInteractionToggle" class="map-mode-toggle" type="button" role="switch" aria-checked="false" title="切换回原来的框选与抓手操作方式"><span class="map-mode-toggle-track" aria-hidden="true"><i></i></span><span>经典操作</span></button>
             </div>
             <div class="flow-palette" aria-label="流程图形工具箱">
               <span class="palette-hint">拖到画布</span>
@@ -206,7 +206,7 @@
               <p>从上方工具箱拖入图形，用箭头连接，再为图形添加便签或章节链接。</p>
               <button id="emptyAddButton" type="button">添加第一个长方形</button>
             </div>
-            <div class="map-help">空白处拖动画布 · 图形可直接操作 · Shift+拖动框选 · 空格/中键临时抓手 · 滚轮平移</div>
+            <div id="mapHelpText" class="map-help">空白处拖动画布 · 图形可直接操作 · Shift+拖动框选 · 空格/中键临时抓手 · 滚轮平移</div>
             <aside id="minimapPanel" class="minimap-panel hidden" aria-label="画布缩略图">
               <div id="minimapHandle" class="minimap-handle"><strong>画布导航</strong><span>拖动此处移动缩略图</span></div>
               <svg id="minimapSvg" class="minimap-svg" role="img" aria-label="流程图缩略图" preserveAspectRatio="none"></svg>
