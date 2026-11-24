@@ -525,6 +525,15 @@ function renderWritingAppearanceControls() {
     toggle.classList.toggle("active", writingAppearance.night);
     toggle.setAttribute("aria-checked", String(writingAppearance.night));
   }
+  const quickToggle = $("#nightModeButton");
+  if (quickToggle) {
+    const label = writingAppearance.night ? "切换到浅色模式" : "切换到夜间模式";
+    quickToggle.classList.toggle("active", writingAppearance.night);
+    quickToggle.setAttribute("aria-pressed", String(writingAppearance.night));
+    quickToggle.setAttribute("aria-label", label);
+    quickToggle.title = label;
+    quickToggle.textContent = writingAppearance.night ? "☀" : "◐";
+  }
 }
 
 function applyWritingAppearance() {
@@ -1710,7 +1719,10 @@ function bindEvents() {
     saveWritingAppearance();
     toast("背景与稿纸设置已恢复默认");
   });
-  $("#focusButton").addEventListener("click", () => $("#app").classList.toggle("focus-mode"));
+  $("#nightModeButton").addEventListener("click", () => {
+    writingAppearance.night = !writingAppearance.night;
+    saveWritingAppearance();
+  });
   $("#editorMapButton").addEventListener("click", () => switchView("map"));
   $("#settingsButton").addEventListener("click", () => $("#settingsDialog").showModal());
   $("#testConnection").addEventListener("click", testConnection);

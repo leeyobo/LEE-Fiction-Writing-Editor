@@ -443,9 +443,15 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 
 .app-shell.night-mode { --bg: #111827; --surface: #182131; --ink: #e5e9f0; --muted: #9aa8bd; --line: #334155; --soft: #223047; --accent: #60a5fa; --accent-strong: #93c5fd; color: var(--ink); background: #111827; }
 .night-mode .topbar, .night-mode .chapter-panel, .night-mode .editor-toolbar, .night-mode .map-toolbar, .night-mode .mobile-nav, .night-mode .mobile-nav button { color: var(--ink); border-color: var(--line); background: rgba(24,33,49,.97); }
-.night-mode .chapter-item:hover, .night-mode .chapter-item.active { background: #223047; }
+.night-mode .chapter-item:hover { background: #202d42; }
+.night-mode .chapter-item.active { color: #e8f1ff; background: #2a3c59; box-shadow: inset 3px 0 0 #60a5fa; }
+.night-mode .chapter-item.active .chapter-copy strong { color: #f8fafc; }
+.night-mode .chapter-item.active .chapter-copy small, .night-mode .chapter-item.active .chapter-words { color: #bdcbe0; }
 .night-mode .chapter-number { color: #b4c0d1; background: #263348; }
 .night-mode .chapter-item.active .chapter-number { color: #0f172a; background: #93c5fd; }
+.night-mode .night-mode-button { color: #cbd5e1; border-color: #415069; background: #1b2738; }
+.night-mode .night-mode-button.active { color: #fbbf24; border-color: #64748b; background: #26364e; }
+.night-mode .night-mode-button:hover { border-color: #64748b; background: #314158; }
 .night-mode .search-box, .night-mode .editor-map-button, .night-mode .shortcut-help-button, .night-mode .format-tools button, .night-mode .project-option, .night-mode .typography-toggle, .night-mode .writing-color, .night-mode .typography-field select { color: #dbe4ef; border-color: #3a4a61; background: #1c2738; }
 .night-mode .write-view { background: #0f1722; }
 .night-mode .write-view .paper { background-color: #171d27; background-image: radial-gradient(circle at 1px 1px,rgba(255,255,255,.035) .65px,transparent .8px),linear-gradient(135deg,rgba(255,255,255,.018),rgba(0,0,0,.08)); }
@@ -472,7 +478,14 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .canvas-context-menu [data-context-action="delete"] { color: #fb7185; }
 .night-mode .background-panel-heading button, .night-mode .inspector-heading button, .night-mode .modal-heading > button { color: #dbeafe; background: #26364e; }
 .night-mode ::-webkit-scrollbar-thumb { background: #46556a; }
+.night-mode .flow-palette button:not(.connect-button):not(.clear-canvas-button) { color: #dbe4ef; border-color: #40506a; background: #1d293b; }
+.night-mode .flow-palette button:not(.connect-button):not(.clear-canvas-button):hover { border-color: #6687b4; background: #27364d; }
 .night-mode .map-viewport { background-color: #111827; background-image: radial-gradient(#344258 1px,transparent 1px); }
+.night-mode .story-node { color: #1e293b; }
+.night-mode .story-node .node-label { color: #172033; }
+.night-mode .story-node .node-link { color: #475569; }
+.night-mode .story-node.shape-note { color: #493b1f; }
+.night-mode .edge-layer .edge-label { fill: #bfdbfe; stroke: #111827; }
 .night-mode .write-view.guide-solid .manuscript { background-image: linear-gradient(to bottom,transparent calc(100% - 1px),rgba(148,163,184,.28) 0); }
 .night-mode .write-view.guide-dashed .manuscript { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='1'%3E%3Cpath d='M0 .5H7' stroke='%235b687b' stroke-width='1'/%3E%3C/svg%3E"); }
 
