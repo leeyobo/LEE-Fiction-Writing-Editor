@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -105,7 +106,7 @@ class ApiFlowTest(unittest.TestCase):
         ).json()
         timestamp = main.now()
         legacy_scene_id = "scene_legacy"
-        with sqlite3.connect(str(main.DATABASE_PATH)) as connection:
+        with closing(sqlite3.connect(str(main.DATABASE_PATH))) as connection, connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute(
                 """INSERT INTO scenes(id, project_id, chapter_id, title, content, position, created_at, updated_at)
@@ -128,7 +129,7 @@ class ApiFlowTest(unittest.TestCase):
         linked_node = next(item for item in loaded["nodes"] if item["id"] == node["id"])
         self.assertEqual(linked_node["chapter_id"], promoted["id"])
         self.assertNotIn("scene_id", linked_node)
-        with sqlite3.connect(str(main.DATABASE_PATH)) as connection:
+        with closing(sqlite3.connect(str(main.DATABASE_PATH))) as connection, connection:
             remaining_scenes = connection.execute("SELECT COUNT(*) FROM scenes").fetchone()[0]
         self.assertEqual(remaining_scenes, 0)
 
@@ -228,7 +229,7 @@ class ApiFlowTest(unittest.TestCase):
     def test_existing_single_canvas_database_is_migrated_to_default_story_map(self):
         legacy_path = Path(self.temporary_directory.name) / "legacy-map.db"
         timestamp = main.now()
-        with sqlite3.connect(str(legacy_path)) as connection:
+        with closing(sqlite3.connect(str(legacy_path))) as connection, connection:
             connection.executescript(
                 """
                 CREATE TABLE projects (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -266,7 +267,7 @@ class ApiFlowTest(unittest.TestCase):
         try:
             main.DATABASE_PATH = legacy_path
             main.init_db()
-            with sqlite3.connect(str(legacy_path)) as connection:
+            with closing(sqlite3.connect(str(legacy_path))) as connection, connection:
                 connection.row_factory = sqlite3.Row
                 story_maps = connection.execute("SELECT * FROM story_maps").fetchall()
                 node_map_ids = {row["map_id"] for row in connection.execute("SELECT map_id FROM nodes")}
@@ -275,6 +276,82 @@ class ApiFlowTest(unittest.TestCase):
             self.assertEqual(story_maps[0]["title"], "主故事线")
             self.assertEqual(node_map_ids, {story_maps[0]["id"]})
             self.assertEqual(edge_map_id, story_maps[0]["id"])
+        finally:
+            main.DATABASE_PATH = current_path
+
+    def test_volumes_create_chapters_and_delete_preserving_chapter_content(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Volume workflow", "description": ""}
+        ).json()
+        first_volume = project["volumes"][0]
+        first_chapter = project["chapters"][0]
+        self.assertEqual(first_volume["title"], "第一卷")
+        self.assertEqual(first_chapter["volume_id"], first_volume["id"])
+
+        second_volume_response = self.client.post(
+            f"/api/projects/{project['id']}/volumes", json={"title": "第二卷"}
+        )
+        self.assertEqual(second_volume_response.status_code, 201)
+        second_volume = second_volume_response.json()
+        moved_chapter = self.client.post(
+            f"/api/projects/{project['id']}/chapters",
+            json={"title": "第二卷第一章", "volume_id": second_volume["id"]},
+        ).json()
+        self.client.patch(
+            f"/api/chapters/{moved_chapter['id']}",
+            json={"content": "正文需要在删除卷后保留。"},
+        )
+
+        deleted = self.client.delete(f"/api/volumes/{second_volume['id']}")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["moved_chapters"], 1)
+        self.assertEqual(deleted.json()["target_volume_id"], first_volume["id"])
+
+        updated = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual([volume["id"] for volume in updated["volumes"]], [first_volume["id"]])
+        preserved = next(chapter for chapter in updated["chapters"] if chapter["id"] == moved_chapter["id"])
+        self.assertEqual(preserved["volume_id"], first_volume["id"])
+        self.assertEqual(preserved["content"], "正文需要在删除卷后保留。")
+
+        refused = self.client.delete(f"/api/volumes/{first_volume['id']}")
+        self.assertEqual(refused.status_code, 409)
+
+    def test_existing_chapters_migrate_to_a_default_volume(self):
+        legacy_path = Path(self.temporary_directory.name) / "legacy-volume.db"
+        timestamp = main.now()
+        with closing(sqlite3.connect(str(legacy_path))) as connection, connection:
+            connection.executescript(
+                """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE chapters (
+                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                """
+            )
+            connection.execute(
+                "INSERT INTO projects VALUES (?, ?, '', ?, ?)",
+                ("legacy_project", "Legacy", timestamp, timestamp),
+            )
+            connection.execute(
+                "INSERT INTO chapters VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("legacy_chapter", "legacy_project", "Saved chapter", "Saved content", 0, timestamp, timestamp),
+            )
+
+        current_path = main.DATABASE_PATH
+        try:
+            main.DATABASE_PATH = legacy_path
+            main.init_db()
+            project = self.client.get("/api/projects/legacy_project").json()
+            self.assertEqual(len(project["volumes"]), 1)
+            self.assertEqual(project["volumes"][0]["title"], "第一卷")
+            self.assertEqual(project["chapters"][0]["id"], "legacy_chapter")
+            self.assertEqual(project["chapters"][0]["volume_id"], project["volumes"][0]["id"])
+            self.assertEqual(project["chapters"][0]["content"], "Saved content")
         finally:
             main.DATABASE_PATH = current_path
 

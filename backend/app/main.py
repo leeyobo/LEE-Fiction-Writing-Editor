@@ -66,9 +66,19 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS volumes (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS chapters (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                volume_id TEXT REFERENCES volumes(id) ON DELETE SET NULL,
                 title TEXT NOT NULL,
                 content TEXT NOT NULL DEFAULT '',
                 position INTEGER NOT NULL DEFAULT 0,
@@ -132,6 +142,7 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, position);
+            CREATE INDEX IF NOT EXISTS idx_volumes_project ON volumes(project_id, position);
             CREATE INDEX IF NOT EXISTS idx_story_maps_project ON story_maps(project_id, position);
             CREATE INDEX IF NOT EXISTS idx_scenes_chapter ON scenes(chapter_id, position);
             CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
@@ -139,6 +150,10 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_node_notes_node ON node_notes(node_id, position);
             """
         )
+        chapter_columns = {row["name"] for row in connection.execute("PRAGMA table_info(chapters)").fetchall()}
+        if "volume_id" not in chapter_columns:
+            connection.execute("ALTER TABLE chapters ADD COLUMN volume_id TEXT REFERENCES volumes(id) ON DELETE SET NULL")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_chapters_volume ON chapters(volume_id, position)")
         node_columns = {row["name"] for row in connection.execute("PRAGMA table_info(nodes)").fetchall()}
         if "map_id" not in node_columns:
             connection.execute("ALTER TABLE nodes ADD COLUMN map_id TEXT REFERENCES story_maps(id) ON DELETE CASCADE")
@@ -218,6 +233,25 @@ def init_db() -> None:
                     next_position += 1
             connection.execute("DELETE FROM scenes WHERE project_id = ?", (project_id,))
             connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now(), project_id))
+        volume_projects = connection.execute("SELECT id, created_at, updated_at FROM projects").fetchall()
+        for project in volume_projects:
+            volume = connection.execute(
+                "SELECT id FROM volumes WHERE project_id = ? ORDER BY position, created_at LIMIT 1",
+                (project["id"],),
+            ).fetchone()
+            if not volume:
+                volume_id = new_id("volume")
+                connection.execute(
+                    """INSERT INTO volumes(id, project_id, title, position, created_at, updated_at)
+                       VALUES (?, ?, '第一卷', 0, ?, ?)""",
+                    (volume_id, project["id"], project["created_at"], project["updated_at"]),
+                )
+            else:
+                volume_id = volume["id"]
+            connection.execute(
+                "UPDATE chapters SET volume_id = ? WHERE project_id = ? AND volume_id IS NULL",
+                (volume_id, project["id"]),
+            )
         connection.execute(
             """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
                SELECT 'note_' || lower(hex(randomblob(16))), n.project_id, n.id, n.note, 0, 0, n.updated_at, n.updated_at
@@ -254,14 +288,20 @@ class StoryMapUpdate(BaseModel):
     position: Optional[int] = Field(default=None, ge=0)
 
 
+class VolumeCreate(BaseModel):
+    title: str = Field(default="新卷", min_length=1, max_length=120)
+
+
 class ChapterCreate(BaseModel):
     title: str = Field(default="新章节", min_length=1, max_length=120)
+    volume_id: Optional[str] = None
 
 
 class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=120)
     content: Optional[str] = None
     position: Optional[int] = Field(default=None, ge=0)
+    volume_id: Optional[str] = None
 
 
 class ChapterBulkDelete(BaseModel):
@@ -334,7 +374,7 @@ class EdgeUpdate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.9.0",
+    version="0.10.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -352,7 +392,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.9.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.10.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -369,6 +409,7 @@ def create_project(payload: ProjectCreate):
     project_id = new_id("project")
     chapter_id = new_id("chapter")
     map_id = new_id("map")
+    volume_id = new_id("volume")
     timestamp = now()
     with db() as connection:
         connection.execute(
@@ -381,8 +422,13 @@ def create_project(payload: ProjectCreate):
             (map_id, project_id, timestamp, timestamp),
         )
         connection.execute(
-            "INSERT INTO chapters(id, project_id, title, content, position, created_at, updated_at) VALUES (?, ?, ?, '', 0, ?, ?)",
-            (chapter_id, project_id, "第一章", timestamp, timestamp),
+            """INSERT INTO volumes(id, project_id, title, position, created_at, updated_at)
+               VALUES (?, ?, '第一卷', 0, ?, ?)""",
+            (volume_id, project_id, timestamp, timestamp),
+        )
+        connection.execute(
+            "INSERT INTO chapters(id, project_id, volume_id, title, content, position, created_at, updated_at) VALUES (?, ?, ?, ?, '', 0, ?, ?)",
+            (chapter_id, project_id, volume_id, "第一章", timestamp, timestamp),
         )
     return get_project(project_id)
 
@@ -394,7 +440,14 @@ def get_project(project_id: str):
         if not project:
             raise HTTPException(status_code=404, detail="作品不存在")
         chapters = connection.execute(
-            "SELECT * FROM chapters WHERE project_id = ? ORDER BY position, created_at", (project_id,)
+            """SELECT chapters.* FROM chapters
+               LEFT JOIN volumes ON volumes.id = chapters.volume_id
+               WHERE chapters.project_id = ?
+               ORDER BY volumes.position, chapters.position, chapters.created_at""",
+            (project_id,),
+        ).fetchall()
+        volumes = connection.execute(
+            "SELECT * FROM volumes WHERE project_id = ? ORDER BY position, created_at", (project_id,)
         ).fetchall()
         story_maps = connection.execute(
             "SELECT * FROM story_maps WHERE project_id = ? ORDER BY position, created_at", (project_id,)
@@ -407,6 +460,7 @@ def get_project(project_id: str):
     return {
         **dict(project),
         "maps": [dict(row) for row in story_maps],
+        "volumes": [dict(row) for row in volumes],
         "chapters": [dict(row) for row in chapters],
         "nodes": [serialize_node(row) for row in nodes],
         "edges": [dict(row) for row in edges],
@@ -520,6 +574,67 @@ def clear_project_canvas(project_id: str):
     return {"nodes": node_count, "edges": edge_count, "notes": note_count}
 
 
+@app.post("/api/projects/{project_id}/volumes", status_code=201, dependencies=[Depends(authorize)])
+def create_volume(project_id: str, payload: VolumeCreate):
+    volume_id = new_id("volume")
+    timestamp = now()
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM volumes WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()["position"]
+        connection.execute(
+            """INSERT INTO volumes(id, project_id, title, position, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (volume_id, project_id, payload.title, position, timestamp, timestamp),
+        )
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
+        row = connection.execute("SELECT * FROM volumes WHERE id = ?", (volume_id,)).fetchone()
+    return dict(row)
+
+
+@app.delete("/api/volumes/{volume_id}", dependencies=[Depends(authorize)])
+def delete_volume(volume_id: str):
+    timestamp = now()
+    with db() as connection:
+        volume = connection.execute(
+            "SELECT id, project_id FROM volumes WHERE id = ?", (volume_id,)
+        ).fetchone()
+        if not volume:
+            raise HTTPException(status_code=404, detail="故事卷不存在")
+        volumes = connection.execute(
+            "SELECT id FROM volumes WHERE project_id = ? ORDER BY position, created_at",
+            (volume["project_id"],),
+        ).fetchall()
+        if len(volumes) <= 1:
+            raise HTTPException(status_code=409, detail="作品至少需要保留一个故事卷")
+        target_volume_id = next(item["id"] for item in volumes if item["id"] != volume_id)
+        chapters = connection.execute(
+            "SELECT id FROM chapters WHERE volume_id = ? ORDER BY position, created_at", (volume_id,)
+        ).fetchall()
+        next_position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM chapters WHERE volume_id = ?",
+            (target_volume_id,),
+        ).fetchone()["position"]
+        for offset, chapter in enumerate(chapters):
+            connection.execute(
+                "UPDATE chapters SET volume_id = ?, position = ? WHERE id = ?",
+                (target_volume_id, next_position + offset, chapter["id"]),
+            )
+        connection.execute("DELETE FROM volumes WHERE id = ?", (volume_id,))
+        remaining_volumes = connection.execute(
+            "SELECT id FROM volumes WHERE project_id = ? ORDER BY position, created_at",
+            (volume["project_id"],),
+        ).fetchall()
+        for position, item in enumerate(remaining_volumes):
+            connection.execute("UPDATE volumes SET position = ? WHERE id = ?", (position, item["id"]))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, volume["project_id"]))
+    return {"deleted_volume_id": volume_id, "moved_chapters": len(chapters), "target_volume_id": target_volume_id}
+
+
 @app.post("/api/projects/{project_id}/chapters", status_code=201, dependencies=[Depends(authorize)])
 def create_chapter(project_id: str, payload: ChapterCreate):
     chapter_id = new_id("chapter")
@@ -528,12 +643,23 @@ def create_chapter(project_id: str, payload: ChapterCreate):
         project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
         if not project:
             raise HTTPException(status_code=404, detail="作品不存在")
+        if payload.volume_id:
+            volume = connection.execute(
+                "SELECT id FROM volumes WHERE id = ? AND project_id = ?", (payload.volume_id, project_id)
+            ).fetchone()
+        else:
+            volume = connection.execute(
+                "SELECT id FROM volumes WHERE project_id = ? ORDER BY position, created_at LIMIT 1", (project_id,)
+            ).fetchone()
+        if not volume:
+            raise HTTPException(status_code=400, detail="故事卷不存在或不属于当前作品")
         position = connection.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM chapters WHERE project_id = ?", (project_id,)
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM chapters WHERE volume_id = ?",
+            (volume["id"],),
         ).fetchone()["position"]
         connection.execute(
-            "INSERT INTO chapters(id, project_id, title, content, position, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?)",
-            (chapter_id, project_id, payload.title, position, timestamp, timestamp),
+            "INSERT INTO chapters(id, project_id, volume_id, title, content, position, created_at, updated_at) VALUES (?, ?, ?, ?, '', ?, ?, ?)",
+            (chapter_id, project_id, volume["id"], payload.title, position, timestamp, timestamp),
         )
         connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
         row = connection.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
@@ -550,6 +676,13 @@ def update_chapter(chapter_id: str, payload: ChapterUpdate):
         chapter = connection.execute("SELECT project_id FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
         if not chapter:
             raise HTTPException(status_code=404, detail="章节不存在")
+        if "volume_id" in changes:
+            volume = connection.execute(
+                "SELECT id FROM volumes WHERE id = ? AND project_id = ?",
+                (changes["volume_id"], chapter["project_id"]),
+            ).fetchone()
+            if not volume:
+                raise HTTPException(status_code=400, detail="故事卷不存在或不属于当前作品")
         assignments = ", ".join(f"{column} = ?" for column in changes)
         connection.execute(f"UPDATE chapters SET {assignments} WHERE id = ?", (*changes.values(), chapter_id))
         connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (changes["updated_at"], chapter["project_id"]))
@@ -595,11 +728,15 @@ def bulk_delete_chapters(project_id: str, payload: ChapterBulkDelete):
             f"DELETE FROM chapters WHERE project_id = ? AND id IN ({placeholders})",
             (project_id, *chapter_ids),
         )
-        remaining = connection.execute(
-            "SELECT id FROM chapters WHERE project_id = ? ORDER BY position, created_at", (project_id,)
+        volumes = connection.execute(
+            "SELECT id FROM volumes WHERE project_id = ? ORDER BY position, created_at", (project_id,)
         ).fetchall()
-        for position, chapter in enumerate(remaining):
-            connection.execute("UPDATE chapters SET position = ? WHERE id = ?", (position, chapter["id"]))
+        for volume in volumes:
+            remaining = connection.execute(
+                "SELECT id FROM chapters WHERE volume_id = ? ORDER BY position, created_at", (volume["id"],)
+            ).fetchall()
+            for position, chapter in enumerate(remaining):
+                connection.execute("UPDATE chapters SET position = ? WHERE id = ?", (position, chapter["id"]))
         connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now(), project_id))
     return {"chapters": len(chapter_ids)}
 

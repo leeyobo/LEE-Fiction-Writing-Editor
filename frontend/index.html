@@ -44,10 +44,7 @@
             <div class="story-map-list-heading"><span>故事地图</span><button id="addStoryMapButton" type="button" title="新建故事地图" aria-label="新建故事地图">＋</button></div>
             <ol id="storyMapList" class="story-map-list"></ol>
           </section>
-          <div class="volume-label">
-            <div class="volume-label-info"><span>第一卷</span><small id="chapterCount">0 章</small></div>
-            <div class="panel-title-actions"><button id="chapterBatchButton" class="chapter-batch-button" type="button" title="批量选择并删除章节">批量删除</button><button id="addChapterButton" class="add-button" type="button" title="新建章节">＋</button></div>
-          </div>
+          <div class="volume-toolbar"><span>故事卷</span><div><button id="chapterBatchButton" class="chapter-batch-button" type="button" title="批量选择并删除章节">批量删除</button><button id="addVolumeButton" class="add-volume-button" type="button" title="新增故事卷">＋ 新建卷</button></div></div>
           <ol id="chapterList" class="chapter-list"></ol>
           <div class="sidebar-footer">
             <div class="progress-ring"><span id="totalWords">0</span></div>
@@ -330,6 +327,25 @@
         <div class="modal-heading"><div><p class="eyebrow">MANUSCRIPT</p><h2>修改章节标题</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
         <label>章节标题<input id="renameChapterInput" maxlength="120" placeholder="输入章节标题" autocomplete="off" /></label>
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="saveChapterRenameButton" class="wide-button" type="button">保存标题</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="newVolumeDialog" class="modal map-name-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">MANUSCRIPT</p><h2>新增故事卷</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
+        <label>故事卷名称<input id="newVolumeTitle" maxlength="120" placeholder="例如：第一卷" autocomplete="off" /></label>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="saveNewVolumeButton" class="wide-button" type="button">创建故事卷</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="deleteVolumeDialog" class="modal confirm-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DELETE VOLUME</p><h2>确认删除故事卷？</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
+        <div class="confirm-warning" aria-hidden="true">!</div>
+        <p id="deleteVolumeSummary" class="confirm-summary"></p>
+        <p id="deleteVolumeDetails" class="modal-copy"></p>
+        <p class="confirm-danger-copy">章节正文不会删除，将保留并移动到其他故事卷。</p>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="confirmDeleteVolumeButton" class="danger-confirm-button" type="button">确认删除卷</button></div>
       </form>
     </dialog>
 

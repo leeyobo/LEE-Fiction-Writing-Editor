@@ -67,6 +67,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .chapter-batch-bar input { accent-color: #2563eb; }
 .chapter-batch-bar button { padding: 6px 8px; border: 1px solid #efb8c0; border-radius: 7px; color: #b63245; background: #fff8f9; cursor: pointer; font-size: 11px; }
 .chapter-batch-bar button:disabled { opacity: .45; cursor: not-allowed; }
+.volume-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px 0 7px; padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.volume-toolbar > div { display: flex; align-items: center; gap: 6px; }
+.add-volume-button { height: 30px; padding: 0 9px; border: 1px solid #bfd2ee; border-radius: 8px; color: #315b94; background: white; cursor: pointer; font-size: 11px; font-weight: 600; }
+.add-volume-button:hover { color: white; border-color: var(--accent); background: var(--accent); }
 .story-map-list-section { margin: -2px 0 17px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .story-map-list-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 7px 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .story-map-list-heading button { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 1px solid #bfd2ee; border-radius: 8px; color: var(--accent); background: white; cursor: pointer; font-size: 18px; line-height: 1; }
@@ -85,10 +89,20 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .story-map-actions [data-rename-map] { color: #667085; border-color: #d7dce5; background: #f5f6f8; }
 .story-map-actions [data-rename-map]:hover { color: #475467; border-color: #c4cad4; background: #eceef2; }
 .story-map-actions button:disabled { opacity: .42; cursor: not-allowed; }
-.volume-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.volume-group { margin: 0 0 10px; padding: 0; list-style: none; }
+.volume-group + .volume-group { margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--line); }
+.volume-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 5px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .volume-label-info { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
 .volume-label-info small { color: var(--muted); font-size: 11px; }
-.volume-label .panel-title-actions { flex: 0 0 auto; }
+.volume-label-info strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.volume-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; opacity: 0; pointer-events: none; transition: opacity .14s ease; }
+.volume-group:hover .volume-actions, .volume-group:focus-within .volume-actions { opacity: 1; pointer-events: auto; }
+.volume-actions button { padding: 5px 6px; border: 1px solid #cbdcf3; border-radius: 7px; color: #315b94; background: white; cursor: pointer; font-size: 10px; line-height: 1.2; white-space: nowrap; }
+.volume-actions button:hover { color: #1d4ed8; border-color: #9bbaf0; background: #eef4ff; }
+.volume-actions .volume-delete-button { color: #bd3548; border-color: #efb8c0; background: #fff8f9; }
+.volume-actions .volume-delete-button:hover { color: #9f2638; border-color: #e9aab4; background: #fff0f2; }
+.volume-actions button:disabled { opacity: .42; cursor: not-allowed; }
+.volume-chapter-list { margin: 0; padding: 0; list-style: none; }
 .chapter-list { min-height: 0; flex: 1; list-style: none; padding: 0; margin: 0; overflow: auto; }
 .chapter-group { list-style: none; margin: 0 0 4px; }
 .chapter-item { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; min-height: 50px; margin-bottom: 4px; padding: 7px 9px; border-radius: 11px; cursor: pointer; }
@@ -113,6 +127,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .chapter-action-button:disabled { opacity: .42 !important; cursor: not-allowed; }
 .chapter-item.bulk-select .chapter-action-button { display: none; }
 .chapter-item.bulk-select .chapter-trailing { width: 42px; }
+.chapter-panel.bulk-mode .volume-actions { display: none; }
 .sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; padding: 16px 10px 0; border-top: 1px solid var(--line); }
 .sidebar-footer div:last-child { display: grid; gap: 2px; }
 .progress-ring { display: grid; place-items: center; width: 43px; height: 43px; border-radius: 50%; background: conic-gradient(var(--accent) 33%, #e5e7ef 0); position: relative; }
@@ -561,6 +576,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .chapter-item:hover { background: #202d42; }
 .night-mode .chapter-item.active { color: #e8f1ff; background: #2a3c59; box-shadow: inset 3px 0 0 #60a5fa; }
 .night-mode .story-map-list-heading button, .night-mode .story-map-icon { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .add-volume-button, .night-mode .volume-actions button { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .volume-actions .volume-delete-button { color: #f0a2ad; border-color: #754554; background: #33232c; }
+.night-mode .volume-actions .volume-delete-button:hover { color: #ffd6dc; border-color: #a95c6b; background: #422b36; }
+.night-mode .add-volume-button:hover, .night-mode .volume-actions button:not(.volume-delete-button):hover { color: white; border-color: #3b82f6; background: #2563eb; }
 .night-mode .story-map-actions button { color: #f0a2ad; border-color: #754554; background: #33232c; }
 .night-mode .story-map-actions button:hover { color: #ffd6dc; border-color: #a95c6b; background: #422b36; }
 .night-mode .story-map-actions [data-rename-map] { color: #d0d5dd; border-color: #4b5565; background: #283140; }
@@ -665,6 +684,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
   .chapter-item:not(.bulk-select) .chapter-words { opacity: 0; }
   .chapter-item:not(.bulk-select) .chapter-action-button { opacity: 1; pointer-events: auto; }
   .story-map-actions { opacity: 1; pointer-events: auto; }
+  .volume-actions { opacity: 1; pointer-events: auto; }
   .view-panel.active { display: none; }
   .view-panel.mobile-active { display: flex; }
   .editor-toolbar { height: 45px; flex-basis: 45px; padding: 0 12px; }

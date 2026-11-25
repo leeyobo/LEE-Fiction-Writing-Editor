@@ -1,6 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const REQUIRED_API_VERSION = "0.9.0";
+const REQUIRED_API_VERSION = "0.10.0";
 
 const state = {
   config: {
@@ -27,6 +27,7 @@ const state = {
   chapterBulkMode: false,
   selectedChapterIds: new Set(),
   pendingChapterDeleteIds: [],
+  pendingVolumeDeleteId: null,
   camera: { x: 0, y: 0 },
   canvasAnchor: null,
   canvasBounds: null,
@@ -1294,6 +1295,7 @@ async function loadProject(projectId) {
   state.chapterBulkMode = false;
   state.selectedChapterIds.clear();
   state.pendingChapterDeleteIds = [];
+  state.pendingVolumeDeleteId = null;
   state.camera = { x: 0, y: 0 };
   state.canvasAnchor = null;
   state.canvasBounds = null;
@@ -1335,25 +1337,48 @@ function chapterMatchesFilter(chapter, filter) {
   return chapter.title.toLowerCase().includes(filter);
 }
 
+function sortProjectChapters() {
+  if (!state.project) return;
+  const volumeOrder = new Map(state.project.volumes.map((volume, index) => [volume.id, index]));
+  state.project.chapters.sort((left, right) => {
+    const volumeDifference = (volumeOrder.get(left.volume_id) ?? Number.MAX_SAFE_INTEGER)
+      - (volumeOrder.get(right.volume_id) ?? Number.MAX_SAFE_INTEGER);
+    return volumeDifference || left.position - right.position;
+  });
+}
+
 function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase()) {
   if (!state.project) return;
+  state.project.volumes ||= [];
   $(".chapter-panel").classList.toggle("bulk-mode", state.chapterBulkMode);
   $("#chapterBatchBar").hidden = !state.chapterBulkMode;
   $("#chapterBatchButton").classList.toggle("active", state.chapterBulkMode);
   $("#chapterBatchButton").textContent = state.chapterBulkMode ? "完成" : "批量删除";
   $("#chapterBatchButton").disabled = state.project.chapters.length <= 1;
   const chapters = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter));
+  const totalVolumes = state.project.volumes.length;
   const writeViewActive = $("#writeView")?.classList.contains("active");
-  $("#chapterList").innerHTML = chapters.map(chapter => {
-    const index = state.project.chapters.indexOf(chapter) + 1;
-    const checked = state.selectedChapterIds.has(chapter.id);
-    return `<li class="chapter-group ${checked ? "selected-for-delete" : ""}">
-      <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${writeViewActive && chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
-        ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
-        <span class="chapter-number">${String(index).padStart(2, "0")}</span>
-        <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong></span>
-        <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-action-button" type="button" data-rename-chapter="${chapter.id}" aria-label="修改${escapeHtml(chapter.title)}标题" title="修改章节标题">修改</button><button class="chapter-action-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
+  $("#chapterList").innerHTML = state.project.volumes.map(volume => {
+    const volumeChapters = chapters.filter(chapter => chapter.volume_id === volume.id);
+    const volumeTotal = state.project.chapters.filter(chapter => chapter.volume_id === volume.id).length;
+    const chapterRows = volumeChapters.map(chapter => {
+      const index = state.project.chapters.indexOf(chapter) + 1;
+      const checked = state.selectedChapterIds.has(chapter.id);
+      return `<li class="chapter-group ${checked ? "selected-for-delete" : ""}">
+        <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${writeViewActive && chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
+          ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
+          <span class="chapter-number">${String(index).padStart(2, "0")}</span>
+          <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong></span>
+          <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-action-button" type="button" data-rename-chapter="${chapter.id}" aria-label="修改${escapeHtml(chapter.title)}标题" title="修改章节标题">修改</button><button class="chapter-action-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
+        </div>
+      </li>`;
+    }).join("");
+    return `<li class="volume-group">
+      <div class="volume-label">
+        <div class="volume-label-info"><strong>${escapeHtml(volume.title)}</strong><small>${volumeTotal} 章</small></div>
+        <div class="volume-actions"><button class="volume-add-chapter" type="button" data-add-chapter-volume="${volume.id}" title="在${escapeHtml(volume.title)}中新建章节">＋ 章节</button><button class="volume-delete-button" type="button" data-delete-volume="${volume.id}" title="删除故事卷" ${totalVolumes <= 1 ? "disabled" : ""}>删卷</button></div>
       </div>
+      <ol class="volume-chapter-list">${chapterRows}</ol>
     </li>`;
   }).join("");
   const selectedCount = state.selectedChapterIds.size;
@@ -1362,7 +1387,6 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
   const visibleSelectedCount = chapters.filter(chapter => state.selectedChapterIds.has(chapter.id)).length;
   $("#selectAllChapters").checked = chapters.length > 0 && visibleSelectedCount === chapters.length;
   $("#selectAllChapters").indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < chapters.length;
-  $("#chapterCount").textContent = `${state.project.chapters.length} 章`;
   const chapterWords = state.project.chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0);
   $("#totalWords").textContent = chapterWords.toLocaleString();
 }
@@ -1702,18 +1726,92 @@ function queueDocumentSave() {
   }, 650);
 }
 
-async function addChapter() {
+async function addChapterToVolume(volumeId) {
   if (!requireProject("新建章节")) return;
+  const volume = state.project.volumes.find(item => item.id === volumeId);
+  if (!volume) return;
   try {
-    const chapter = await api(`/api/projects/${state.project.id}/chapters`, { method: "POST", body: JSON.stringify({ title: `第 ${state.project.chapters.length + 1} 章` }) });
+    const chapterNumber = state.project.chapters.filter(chapter => chapter.volume_id === volumeId).length + 1;
+    const chapter = await api(`/api/projects/${state.project.id}/chapters`, {
+      method: "POST",
+      body: JSON.stringify({ title: `第 ${chapterNumber} 章`, volume_id: volumeId }),
+    });
     state.project.chapters.push(chapter);
+    sortProjectChapters();
     state.chapterBulkMode = false;
     state.selectedChapterIds.clear();
     renderChapterOptions();
     selectChapter(chapter.id);
     $("#chapterTitleInput").select();
-    toast("新章节已创建");
+    toast(`已在“${volume.title}”中新建章节`);
   } catch (error) { toast(error.message); }
+}
+
+function openNewVolumeDialog() {
+  if (!requireProject("新建故事卷")) return;
+  $("#newVolumeTitle").value = `第 ${state.project.volumes.length + 1} 卷`;
+  $("#newVolumeDialog").showModal();
+  requestAnimationFrame(() => {
+    $("#newVolumeTitle").focus();
+    $("#newVolumeTitle").select();
+  });
+}
+
+async function saveNewVolume() {
+  const title = $("#newVolumeTitle").value.trim();
+  if (!title) { toast("故事卷名称不能为空"); $("#newVolumeTitle").focus(); return; }
+  const button = $("#saveNewVolumeButton");
+  button.disabled = true;
+  try {
+    const volume = await api(`/api/projects/${state.project.id}/volumes`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+    state.project.volumes.push(volume);
+    $("#newVolumeDialog").close();
+    renderChapters();
+    toast(`“${volume.title}”已创建`);
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+}
+
+function openDeleteVolumeDialog(volumeId) {
+  const volume = state.project?.volumes.find(item => item.id === volumeId);
+  if (!volume) return;
+  if (state.project.volumes.length <= 1) { toast("作品至少需要保留一个故事卷"); return; }
+  const chapters = state.project.chapters.filter(chapter => chapter.volume_id === volumeId);
+  const target = state.project.volumes.find(item => item.id !== volumeId);
+  state.pendingVolumeDeleteId = volumeId;
+  $("#deleteVolumeSummary").textContent = `将删除“${volume.title}”。`;
+  $("#deleteVolumeDetails").textContent = chapters.length
+    ? `其中 ${chapters.length} 个章节将移动到“${target.title}”，章节正文和故事地图链接会保留。`
+    : "这个故事卷没有章节。";
+  $("#deleteVolumeDialog").showModal();
+}
+
+async function deletePendingVolume() {
+  const volumeId = state.pendingVolumeDeleteId;
+  if (!volumeId) return;
+  const button = $("#confirmDeleteVolumeButton");
+  button.disabled = true;
+  try {
+    const result = await api(`/api/volumes/${volumeId}`, { method: "DELETE" });
+    state.project.volumes = state.project.volumes.filter(volume => volume.id !== volumeId);
+    state.project.chapters.forEach(chapter => {
+      if (chapter.volume_id === volumeId) chapter.volume_id = result.target_volume_id;
+    });
+    sortProjectChapters();
+    state.pendingVolumeDeleteId = null;
+    $("#deleteVolumeDialog").close();
+    renderChapters();
+    renderChapterOptions();
+    renderSplitPane();
+    renderEditor();
+    toast(result.moved_chapters
+      ? `故事卷已删除，${result.moved_chapters} 个章节已移动到其他卷`
+      : "故事卷已删除");
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
 }
 
 function openChapterRenameDialog(chapterId) {
@@ -2525,6 +2623,10 @@ function bindEvents() {
   });
   $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
   $("#chapterList").addEventListener("click", event => {
+    const addChapterButton = event.target.closest("[data-add-chapter-volume]");
+    if (addChapterButton) { addChapterToVolume(addChapterButton.dataset.addChapterVolume); return; }
+    const deleteVolumeButton = event.target.closest("[data-delete-volume]");
+    if (deleteVolumeButton) { openDeleteVolumeDialog(deleteVolumeButton.dataset.deleteVolume); return; }
     const renameButton = event.target.closest("[data-rename-chapter]");
     if (renameButton) { openChapterRenameDialog(renameButton.dataset.renameChapter); return; }
     const deleteButton = event.target.closest("[data-delete-chapter]");
@@ -2552,7 +2654,12 @@ function bindEvents() {
     const item = event.target.closest(".chapter-item"); if (item) selectChapter(item.dataset.chapterId);
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
-  $("#addChapterButton").addEventListener("click", addChapter);
+  $("#addVolumeButton").addEventListener("click", openNewVolumeDialog);
+  $("#saveNewVolumeButton").addEventListener("click", saveNewVolume);
+  $("#newVolumeTitle").addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); saveNewVolume(); }
+  });
+  $("#confirmDeleteVolumeButton").addEventListener("click", deletePendingVolume);
   $("#saveChapterRenameButton").addEventListener("click", saveChapterRename);
   $("#renameChapterInput").addEventListener("keydown", event => {
     if (event.key === "Enter") { event.preventDefault(); saveChapterRename(); }
