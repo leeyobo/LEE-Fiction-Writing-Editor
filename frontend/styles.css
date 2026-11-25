@@ -489,7 +489,13 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 5px; }
 .modal-actions button, .new-project-row button { border-radius: 9px; padding: 10px 14px; cursor: pointer; }
 .map-name-modal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.map-name-modal .modal-actions button { width: 100%; min-width: 0; white-space: nowrap; }
+.map-name-modal .modal-actions button { width: 100%; min-width: 0; white-space: nowrap; transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.map-name-modal .modal-actions button:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(31,64,120,.16); }
+.map-name-modal .modal-actions button:not(:disabled):active { transform: translateY(0) scale(.98); box-shadow: 0 2px 6px rgba(31,64,120,.12); }
+.map-name-modal .modal-actions .secondary-button:not(:disabled):hover { color: #1d4ed8; border-color: #9bbaf0; background: #eef4ff; }
+.map-name-modal .modal-actions .wide-button:not(:disabled):hover { background: #1d4ed8; box-shadow: 0 7px 16px rgba(37,99,235,.28); }
+.map-name-modal .modal-actions button:focus-visible { outline: 3px solid rgba(37,99,235,.3); outline-offset: 3px; }
+.map-name-modal .modal-actions button:disabled { cursor: not-allowed; }
 .primary-button, .new-project-row button { border: 0; color: white; background: var(--accent-strong); }
 .secondary-button { border: 1px solid var(--line); background: white; }
 .connection-result { min-height: 20px; margin: -4px 0 10px; color: var(--muted); font-size: 12px; }
