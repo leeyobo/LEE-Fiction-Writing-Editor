@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v49-chapter-link-volume-groups";
+const CACHE = "motu-shell-v50-node-port-hit-area";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
