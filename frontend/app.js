@@ -2395,20 +2395,40 @@ function bindNodeInteractions() {
     const element = event.target.closest(".story-node");
     if (!element || event.button !== 0 || event.target.closest(".node-note-card, .node-menu-button") || $("#connectButton").classList.contains("active")) return;
     const node = state.project.nodes.find(item => item.id === element.dataset.nodeId);
-    const startX = event.clientX; const startY = event.clientY; const originX = node.x; const originY = node.y;
+    const selectedIds = state.selectedNodeIds.has(node.id)
+      ? state.selectedNodeIds
+      : new Set([node.id]);
+    const activeNodes = new Map(activeMapNodes().map(item => [item.id, item]));
+    const dragNodes = [...selectedIds]
+      .map(id => activeNodes.get(id))
+      .filter(Boolean)
+      .map(dragNode => ({
+        node: dragNode,
+        element: layer.querySelector(`.story-node[data-node-id="${dragNode.id}"]`),
+        originX: dragNode.x,
+        originY: dragNode.y,
+      }))
+      .filter(item => item.element);
+    const startX = event.clientX; const startY = event.clientY;
     let moved = false;
     element.setPointerCapture(event.pointerId);
     const move = moveEvent => {
       const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
       if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-      node.x = originX + dx;
-      node.y = originY + dy;
-      element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; renderEdges();
+      dragNodes.forEach(item => {
+        item.node.x = item.originX + dx;
+        item.node.y = item.originY + dy;
+        item.element.style.left = `${item.node.x}px`;
+        item.element.style.top = `${item.node.y}px`;
+      });
+      renderEdges();
       expandCanvasBoundsForNodes(); renderMinimap();
     };
     const up = () => {
       element.removeEventListener("pointermove", move); element.removeEventListener("pointerup", up);
-      if (moved) saveNode(node, { x: node.x, y: node.y });
+      if (moved) {
+        dragNodes.forEach(item => saveNode(item.node, { x: item.node.x, y: item.node.y }));
+      }
       else if (node.chapter_id) openNodeLinkedContent(node);
       else selectNodeForActions(node.id);
     };
