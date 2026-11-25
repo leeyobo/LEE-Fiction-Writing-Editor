@@ -85,7 +85,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .story-map-actions [data-rename-map] { color: #667085; border-color: #d7dce5; background: #f5f6f8; }
 .story-map-actions [data-rename-map]:hover { color: #475467; border-color: #c4cad4; background: #eceef2; }
 .story-map-actions button:disabled { opacity: .42; cursor: not-allowed; }
-.volume-label { display: flex; justify-content: space-between; padding: 0 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.volume-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.volume-label-info { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.volume-label-info small { color: var(--muted); font-size: 11px; }
+.volume-label .panel-title-actions { flex: 0 0 auto; }
 .chapter-list { min-height: 0; flex: 1; list-style: none; padding: 0; margin: 0; overflow: auto; }
 .chapter-group { list-style: none; margin: 0 0 4px; }
 .chapter-item { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; min-height: 50px; margin-bottom: 4px; padding: 7px 9px; border-radius: 11px; cursor: pointer; }

@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v36-equal-name-dialog-actions";
+const CACHE = "motu-shell-v37-chapter-actions-position";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
