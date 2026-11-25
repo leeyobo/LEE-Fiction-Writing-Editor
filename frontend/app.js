@@ -1377,7 +1377,6 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
   if (!state.project) return;
   state.project.volumes ||= [];
   $(".chapter-panel").classList.toggle("bulk-mode", state.chapterBulkMode);
-  $("#chapterBatchBar").hidden = !state.chapterBulkMode;
   $("#chapterBatchButton").classList.toggle("active", state.chapterBulkMode);
   $("#chapterBatchButton").textContent = state.chapterBulkMode ? "完成" : "批量删除";
   $("#chapterBatchButton").disabled = state.project.chapters.length <= 1;
@@ -1389,7 +1388,10 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
     : state.project.volumes;
   $("#chapterList").innerHTML = visibleVolumes.map(volume => {
     const volumeChapters = chapters.filter(chapter => chapter.volume_id === volume.id);
-    const volumeTotal = state.project.chapters.filter(chapter => chapter.volume_id === volume.id).length;
+    const allVolumeChapters = state.project.chapters.filter(chapter => chapter.volume_id === volume.id);
+    const selectedVolumeChapters = allVolumeChapters.filter(chapter => state.selectedChapterIds.has(chapter.id));
+    const allVolumeSelected = allVolumeChapters.length > 0 && selectedVolumeChapters.length === allVolumeChapters.length;
+    const volumeTotal = allVolumeChapters.length;
     const chapterRows = volumeChapters.map(chapter => {
       const index = chapterNumberInVolume(chapter);
       const checked = state.selectedChapterIds.has(chapter.id);
@@ -1403,20 +1405,17 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
       </li>`;
     }).join("");
     const collapsed = !filter && state.collapsedVolumeIds.has(volume.id);
+    const volumeActions = state.chapterBulkMode
+      ? `<button class="volume-select-all-button" type="button" data-select-all-volume="${volume.id}" aria-pressed="${allVolumeSelected}" title="${allVolumeSelected ? "取消选择" : "选择"}${escapeHtml(volume.title)}的全部章节">${allVolumeSelected ? "取消全选" : "全选"}</button><button class="volume-delete-selected-button" type="button" data-delete-volume-selected="${volume.id}" ${selectedVolumeChapters.length ? "" : "disabled"} title="删除本卷选中的 ${selectedVolumeChapters.length} 个章节">删除所选</button>`
+      : `<button class="volume-add-chapter" type="button" data-add-chapter-volume="${volume.id}" title="在${escapeHtml(volume.title)}中新建章节">＋ 章节</button><button class="volume-delete-button" type="button" data-delete-volume="${volume.id}" title="删除故事卷" ${totalVolumes <= 1 ? "disabled" : ""}>删卷</button>`;
     return `<li class="volume-group">
       <div class="volume-label">
         <div class="volume-label-info"><button class="volume-collapse-button" type="button" data-toggle-volume="${volume.id}" aria-controls="volume-chapters-${volume.id}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "展开" : "折叠"}${escapeHtml(volume.title)}">${collapsed ? "▸" : "▾"}</button><strong>${escapeHtml(volume.title)}</strong><small>${volumeTotal} 章</small></div>
-        <div class="volume-actions"><button class="volume-add-chapter" type="button" data-add-chapter-volume="${volume.id}" title="在${escapeHtml(volume.title)}中新建章节">＋ 章节</button><button class="volume-delete-button" type="button" data-delete-volume="${volume.id}" title="删除故事卷" ${totalVolumes <= 1 ? "disabled" : ""}>删卷</button></div>
+        <div class="volume-actions">${volumeActions}</div>
       </div>
       <ol id="volume-chapters-${volume.id}" class="volume-chapter-list" ${collapsed ? "hidden" : ""}>${chapterRows}</ol>
     </li>`;
   }).join("");
-  const selectedCount = state.selectedChapterIds.size;
-  $("#selectedChapterCount").textContent = `已选 ${selectedCount} 章`;
-  $("#deleteSelectedChaptersButton").disabled = selectedCount === 0;
-  const visibleSelectedCount = chapters.filter(chapter => state.selectedChapterIds.has(chapter.id)).length;
-  $("#selectAllChapters").checked = chapters.length > 0 && visibleSelectedCount === chapters.length;
-  $("#selectAllChapters").indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < chapters.length;
   const chapterWords = state.project.chapters.reduce((sum, chapter) => sum + wordCount(chapter.content), 0);
   $("#totalWords").textContent = chapterWords.toLocaleString();
 }
@@ -2675,6 +2674,29 @@ function bindEvents() {
   });
   $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
   $("#chapterList").addEventListener("click", event => {
+    const selectAllVolumeButton = event.target.closest("[data-select-all-volume]");
+    if (selectAllVolumeButton) {
+      const volumeId = selectAllVolumeButton.dataset.selectAllVolume;
+      const volumeChapterIds = state.project.chapters
+        .filter(chapter => chapter.volume_id === volumeId)
+        .map(chapter => chapter.id);
+      const allSelected = volumeChapterIds.length > 0 && volumeChapterIds.every(id => state.selectedChapterIds.has(id));
+      volumeChapterIds.forEach(id => {
+        if (allSelected) state.selectedChapterIds.delete(id);
+        else state.selectedChapterIds.add(id);
+      });
+      renderChapters();
+      return;
+    }
+    const deleteVolumeSelectedButton = event.target.closest("[data-delete-volume-selected]");
+    if (deleteVolumeSelectedButton) {
+      const volumeId = deleteVolumeSelectedButton.dataset.deleteVolumeSelected;
+      const selectedIds = state.project.chapters
+        .filter(chapter => chapter.volume_id === volumeId && state.selectedChapterIds.has(chapter.id))
+        .map(chapter => chapter.id);
+      openChapterDeleteDialog(selectedIds);
+      return;
+    }
     const toggleVolumeButton = event.target.closest("[data-toggle-volume]");
     if (toggleVolumeButton) {
       const volumeId = toggleVolumeButton.dataset.toggleVolume;
@@ -2726,13 +2748,6 @@ function bindEvents() {
     if (event.key === "Enter") { event.preventDefault(); saveChapterRename(); }
   });
   $("#chapterBatchButton").addEventListener("click", toggleChapterBulkMode);
-  $("#selectAllChapters").addEventListener("change", event => {
-    const filter = $("#chapterSearch").value.trim().toLowerCase();
-    const visibleIds = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter)).map(chapter => chapter.id);
-    visibleIds.forEach(id => event.currentTarget.checked ? state.selectedChapterIds.add(id) : state.selectedChapterIds.delete(id));
-    renderChapters();
-  });
-  $("#deleteSelectedChaptersButton").addEventListener("click", () => openChapterDeleteDialog([...state.selectedChapterIds]));
   $("#confirmChapterDeleteButton").addEventListener("click", deletePendingChapters);
   $("#chapterTitleInput").addEventListener("input", () => {
     scheduleEditorHistory();

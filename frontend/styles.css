@@ -61,13 +61,6 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .add-button { width: 34px; height: 34px; border: 0; border-radius: 10px; background: var(--accent); color: white; box-shadow: 0 8px 18px rgba(37,99,235,.2); font-size: 20px; cursor: pointer; }
 .search-box { display: flex; align-items: center; gap: 7px; margin: 22px 0 18px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--muted); }
 .search-box input { width: 100%; height: 38px; border: 0; outline: 0; background: transparent; }
-.chapter-batch-bar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin: -7px 0 14px; padding: 9px 10px; border: 1px solid #cbdcf3; border-radius: 10px; color: #60738e; background: #edf5ff; font-size: 11px; }
-.volume-toolbar + .chapter-batch-bar { margin: 0 0 9px; }
-.chapter-batch-bar[hidden] { display: none; }
-.chapter-batch-bar label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
-.chapter-batch-bar input { accent-color: #2563eb; }
-.chapter-batch-bar button { padding: 6px 8px; border: 1px solid #efb8c0; border-radius: 7px; color: #b63245; background: #fff8f9; cursor: pointer; font-size: 11px; }
-.chapter-batch-bar button:disabled { opacity: .45; cursor: not-allowed; }
 .volume-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px 0 7px; padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .volume-toolbar > div { display: flex; align-items: center; gap: 6px; }
 .add-volume-button { height: 30px; padding: 0 9px; border: 1px solid #bfd2ee; border-radius: 8px; color: #315b94; background: white; cursor: pointer; font-size: 11px; font-weight: 600; }
@@ -110,6 +103,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .volume-actions button:hover { color: #1d4ed8; border-color: #9bbaf0; background: #eef4ff; }
 .volume-actions .volume-delete-button { color: #bd3548; border-color: #efb8c0; background: #fff8f9; }
 .volume-actions .volume-delete-button:hover { color: #9f2638; border-color: #e9aab4; background: #fff0f2; }
+.volume-actions .volume-select-all-button { color: #315b94; border-color: #cbdcf3; background: #f7faff; }
+.volume-actions .volume-select-all-button[aria-pressed="true"] { color: white; border-color: #2563eb; background: #2563eb; }
+.volume-actions .volume-delete-selected-button { color: #bd3548; border-color: #efb8c0; background: #fff8f9; }
+.volume-actions .volume-delete-selected-button:hover:not(:disabled) { color: #9f2638; border-color: #e9aab4; background: #fff0f2; }
 .volume-actions button:disabled { opacity: .42; cursor: not-allowed; }
 .volume-chapter-list { margin: 0; padding: 0; list-style: none; }
 .volume-chapter-list[hidden] { display: none; }
@@ -137,7 +134,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .chapter-action-button:disabled { opacity: .42 !important; cursor: not-allowed; }
 .chapter-item.bulk-select .chapter-action-button { display: none; }
 .chapter-item.bulk-select .chapter-trailing { width: 42px; }
-.chapter-panel.bulk-mode .volume-actions { display: none; }
+.chapter-panel.bulk-mode .volume-actions { opacity: 1; pointer-events: auto; }
 .sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; padding: 16px 10px 0; border-top: 1px solid var(--line); }
 .sidebar-footer div:last-child { display: grid; gap: 2px; }
 .progress-ring { display: grid; place-items: center; width: 43px; height: 43px; border-radius: 50%; background: conic-gradient(var(--accent) 33%, #e5e7ef 0); position: relative; }
@@ -589,6 +586,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .story-map-collapse-button { color: #a8b8cf; }
 .night-mode .story-map-collapse-button:hover { color: #bfdbfe; background: #263a59; }
 .night-mode .add-volume-button, .night-mode .volume-actions button { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .volume-actions .volume-delete-selected-button { color: #f0a2ad; border-color: #754554; background: #33232c; }
+.night-mode .volume-actions .volume-select-all-button[aria-pressed="true"] { color: white; border-color: #2563eb; background: #2563eb; }
 .night-mode .volume-collapse-button { color: #a8b8cf; }
 .night-mode .volume-collapse-button:hover { color: #bfdbfe; background: #263a59; }
 .night-mode .volume-actions .volume-delete-button { color: #f0a2ad; border-color: #754554; background: #33232c; }
