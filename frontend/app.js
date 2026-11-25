@@ -2618,6 +2618,8 @@ function bindCanvasSelection() {
     if (interactiveTarget) return;
     const shouldRegionSelect = state.canvasControlScheme === "classic" || event.shiftKey;
     if (!shouldRegionSelect) { startCanvasPan(event); return; }
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
     const bounds = viewport.getBoundingClientRect();
     const start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top, clientX: event.clientX, clientY: event.clientY };
     state.selectionDrag = { start, current: start };
@@ -2631,6 +2633,7 @@ function bindCanvasSelection() {
     };
     draw(start);
     const move = moveEvent => {
+      moveEvent.preventDefault();
       const current = { x: moveEvent.clientX - bounds.left, y: moveEvent.clientY - bounds.top, clientX: moveEvent.clientX, clientY: moveEvent.clientY };
       state.selectionDrag.current = current;
       draw(current);

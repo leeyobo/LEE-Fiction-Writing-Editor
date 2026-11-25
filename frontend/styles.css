@@ -381,6 +381,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .map-viewport.pan-mode, .map-viewport.space-pan { cursor: grab; }
 .map-viewport.panning { cursor: grabbing; }
 .map-viewport.selecting-region { cursor: crosshair; }
+.map-viewport.selecting-region, .map-viewport.selecting-region * { -webkit-user-select: none; user-select: none; }
 .map-viewport.pan-mode .story-node, .map-viewport.space-pan .story-node, .map-viewport.panning .story-node { cursor: inherit; }
 .edge-layer { z-index: 1; overflow: visible; pointer-events: none; }
 .edge-layer .edge-line, .edge-layer .edge-hit { fill: none; pointer-events: stroke; cursor: pointer; }
