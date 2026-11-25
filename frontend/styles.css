@@ -73,9 +73,14 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .add-volume-button:hover { color: white; border-color: var(--accent); background: var(--accent); }
 .story-map-list-section { margin: -2px 0 17px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .story-map-list-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 7px 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
-.story-map-list-heading button { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 1px solid #bfd2ee; border-radius: 8px; color: var(--accent); background: white; cursor: pointer; font-size: 18px; line-height: 1; }
-.story-map-list-heading button:hover { color: white; border-color: var(--accent); background: var(--accent); }
+.story-map-heading-label { display: flex; align-items: center; gap: 2px; }
+.story-map-list-heading #addStoryMapButton { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 1px solid #bfd2ee; border-radius: 8px; color: var(--accent); background: white; cursor: pointer; font-size: 18px; line-height: 1; }
+.story-map-list-heading #addStoryMapButton:hover { color: white; border-color: var(--accent); background: var(--accent); }
+.story-map-collapse-button { display: grid; place-items: center; width: 20px; height: 24px; padding: 0; border: 0; border-radius: 5px; color: #7185a3; background: transparent; cursor: pointer; font-size: 14px; line-height: 1; }
+.story-map-collapse-button:hover { color: #1d4ed8; background: #e8f0ff; }
+.story-map-collapse-button:focus-visible { outline: 2px solid rgba(37,99,235,.35); outline-offset: 1px; }
 .story-map-list { max-height: 152px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.story-map-list[hidden] { display: none; }
 .story-map-item { position: relative; display: grid; grid-template-columns: 25px minmax(0,1fr) 80px; align-items: center; gap: 7px; min-height: 39px; padding: 5px 7px; border-radius: 10px; cursor: pointer; }
 .story-map-item:hover { background: var(--soft); }
 .story-map-item.active { color: #123b78; background: #e6f0ff; }
@@ -579,7 +584,9 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .topbar, .night-mode .chapter-panel, .night-mode .editor-toolbar, .night-mode .map-toolbar, .night-mode .mobile-nav, .night-mode .mobile-nav button { color: var(--ink); border-color: var(--line); background: rgba(24,33,49,.97); }
 .night-mode .chapter-item:hover { background: #202d42; }
 .night-mode .chapter-item.active { color: #e8f1ff; background: #2a3c59; box-shadow: inset 3px 0 0 #60a5fa; }
-.night-mode .story-map-list-heading button, .night-mode .story-map-icon { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .story-map-list-heading #addStoryMapButton, .night-mode .story-map-icon { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .story-map-collapse-button { color: #a8b8cf; }
+.night-mode .story-map-collapse-button:hover { color: #bfdbfe; background: #263a59; }
 .night-mode .add-volume-button, .night-mode .volume-actions button { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
 .night-mode .volume-collapse-button { color: #a8b8cf; }
 .night-mode .volume-collapse-button:hover { color: #bfdbfe; background: #263a59; }

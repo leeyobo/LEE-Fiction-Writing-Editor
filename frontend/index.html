@@ -41,7 +41,7 @@
           <label class="search-box"><span>⌕</span><input id="chapterSearch" type="search" placeholder="搜索章节" /></label>
           <div id="chapterBatchBar" class="chapter-batch-bar" hidden><label><input id="selectAllChapters" type="checkbox" />全选</label><span id="selectedChapterCount">已选 0 章</span><button id="deleteSelectedChaptersButton" type="button" disabled>删除所选</button></div>
           <section class="story-map-list-section" aria-label="故事地图列表">
-            <div class="story-map-list-heading"><span>故事地图</span><button id="addStoryMapButton" type="button" title="新建故事地图" aria-label="新建故事地图">＋</button></div>
+            <div class="story-map-list-heading"><div class="story-map-heading-label"><button id="collapseStoryMapsButton" class="story-map-collapse-button" type="button" aria-controls="storyMapList" aria-expanded="true" aria-label="折叠故事地图">▾</button><span>故事地图</span></div><button id="addStoryMapButton" type="button" title="新建故事地图" aria-label="新建故事地图">＋</button></div>
             <ol id="storyMapList" class="story-map-list"></ol>
           </section>
           <div class="volume-toolbar"><span>故事卷</span><div><button id="chapterBatchButton" class="chapter-batch-button" type="button" title="批量选择并删除章节">批量删除</button><button id="addVolumeButton" class="add-volume-button" type="button" title="新增故事卷">＋ 新建卷</button></div></div>

@@ -29,6 +29,7 @@ const state = {
   pendingChapterDeleteIds: [],
   pendingVolumeDeleteId: null,
   collapsedVolumeIds: new Set(),
+  storyMapsCollapsed: false,
   camera: { x: 0, y: 0 },
   canvasAnchor: null,
   canvasBounds: null,
@@ -1302,6 +1303,7 @@ async function loadProject(projectId) {
   } catch (_) {
     state.collapsedVolumeIds = new Set();
   }
+  state.storyMapsCollapsed = localStorage.getItem(`motu.storyMapsCollapsed.${projectId}`) === "true";
   state.camera = { x: 0, y: 0 };
   state.canvasAnchor = null;
   state.canvasBounds = null;
@@ -1327,6 +1329,11 @@ function renderStoryMaps() {
   if (!state.project) return;
   const maps = state.project.maps || [];
   const mapViewActive = $("#mapView")?.classList.contains("active");
+  const collapseButton = $("#collapseStoryMapsButton");
+  $("#storyMapList").hidden = state.storyMapsCollapsed;
+  collapseButton.textContent = state.storyMapsCollapsed ? "▸" : "▾";
+  collapseButton.setAttribute("aria-expanded", String(!state.storyMapsCollapsed));
+  collapseButton.setAttribute("aria-label", `${state.storyMapsCollapsed ? "展开" : "折叠"}故事地图`);
   $("#storyMapList").innerHTML = maps.map(storyMap => {
     const nodeCount = state.project.nodes.filter(node => node.map_id === storyMap.id).length;
     return `<li class="story-map-item ${mapViewActive && storyMap.id === state.activeMapId ? "active" : ""}" data-story-map-id="${storyMap.id}" title="${escapeHtml(storyMap.title)} · ${nodeCount} 个节点">
@@ -2624,6 +2631,13 @@ function bindCanvasSelection() {
 
 function bindEvents() {
   $$(".view-button").forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
+  $("#collapseStoryMapsButton").addEventListener("click", () => {
+    state.storyMapsCollapsed = !state.storyMapsCollapsed;
+    if (state.project) {
+      localStorage.setItem(`motu.storyMapsCollapsed.${state.project.id}`, String(state.storyMapsCollapsed));
+    }
+    renderStoryMaps();
+  });
   $("#storyMapList").addEventListener("click", event => {
     const renameButton = event.target.closest("[data-rename-map]");
     if (renameButton) { openStoryMapDialog(renameButton.dataset.renameMap); return; }
