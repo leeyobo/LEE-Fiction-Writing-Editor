@@ -173,6 +173,111 @@ class ApiFlowTest(unittest.TestCase):
         )
         self.assertEqual(refused.status_code, 409)
 
+    def test_story_maps_are_independent_and_delete_cascades_only_one_map(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Multiple maps", "description": ""}
+        ).json()
+        first_map = project["maps"][0]
+        second_map = self.client.post(
+            f"/api/projects/{project['id']}/maps", json={"title": "人物关系"}
+        ).json()
+        chapter = project["chapters"][0]
+        first_node = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "主线节点", "map_id": first_map["id"], "chapter_id": chapter["id"]},
+        ).json()
+        second_node = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "人物节点", "map_id": second_map["id"], "chapter_id": chapter["id"]},
+        ).json()
+        second_target = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "人物节点二", "map_id": second_map["id"]},
+        ).json()
+        self.client.post(
+            f"/api/nodes/{second_node['id']}/notes",
+            json={"content": "只属于人物关系图", "locked": True},
+        )
+        edge = self.client.post(
+            f"/api/projects/{project['id']}/edges",
+            json={"source_id": second_node["id"], "target_id": second_target["id"]},
+        )
+        self.assertEqual(edge.status_code, 201)
+        self.assertEqual(edge.json()["map_id"], second_map["id"])
+        cross_map = self.client.post(
+            f"/api/projects/{project['id']}/edges",
+            json={"source_id": first_node["id"], "target_id": second_node["id"]},
+        )
+        self.assertEqual(cross_map.status_code, 400)
+
+        cleared = self.client.delete(f"/api/maps/{second_map['id']}/canvas")
+        self.assertEqual(cleared.json(), {"nodes": 2, "edges": 1, "notes": 1})
+        after_clear = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual([node["id"] for node in after_clear["nodes"]], [first_node["id"]])
+        self.assertEqual(after_clear["nodes"][0]["chapter_id"], chapter["id"])
+        self.assertEqual(after_clear["notes"], [])
+        self.assertEqual(len(after_clear["maps"]), 2)
+
+        deleted = self.client.delete(f"/api/maps/{second_map['id']}")
+        self.assertEqual(deleted.status_code, 204)
+        after_delete = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual([item["id"] for item in after_delete["maps"]], [first_map["id"]])
+        refused = self.client.delete(f"/api/maps/{first_map['id']}")
+        self.assertEqual(refused.status_code, 409)
+
+    def test_existing_single_canvas_database_is_migrated_to_default_story_map(self):
+        legacy_path = Path(self.temporary_directory.name) / "legacy-map.db"
+        timestamp = main.now()
+        with sqlite3.connect(str(legacy_path)) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE projects (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+                CREATE TABLE nodes (
+                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+                    node_type TEXT NOT NULL DEFAULT 'plot', shape TEXT NOT NULL DEFAULT 'rounded', color TEXT NOT NULL DEFAULT 'blue',
+                    x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, chapter_id TEXT, scene_id TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE edges (
+                    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+                    label TEXT NOT NULL DEFAULT '', chapter_id TEXT, line_style TEXT NOT NULL DEFAULT 'solid',
+                    color TEXT NOT NULL DEFAULT 'blue', source_port TEXT NOT NULL DEFAULT 'right', target_port TEXT NOT NULL DEFAULT 'left',
+                    created_at TEXT NOT NULL, UNIQUE(project_id, source_id, target_id)
+                );
+                """
+            )
+            connection.execute(
+                "INSERT INTO projects VALUES (?, ?, ?, ?, ?)",
+                ("project_old", "Old project", "", timestamp, timestamp),
+            )
+            for node_id in ("node_a", "node_b"):
+                connection.execute(
+                    """INSERT INTO nodes(id, project_id, label, created_at, updated_at)
+                       VALUES (?, 'project_old', ?, ?, ?)""",
+                    (node_id, node_id, timestamp, timestamp),
+                )
+            connection.execute(
+                """INSERT INTO edges(id, project_id, source_id, target_id, created_at)
+                   VALUES ('edge_old', 'project_old', 'node_a', 'node_b', ?)""",
+                (timestamp,),
+            )
+
+        current_path = main.DATABASE_PATH
+        try:
+            main.DATABASE_PATH = legacy_path
+            main.init_db()
+            with sqlite3.connect(str(legacy_path)) as connection:
+                connection.row_factory = sqlite3.Row
+                story_maps = connection.execute("SELECT * FROM story_maps").fetchall()
+                node_map_ids = {row["map_id"] for row in connection.execute("SELECT map_id FROM nodes")}
+                edge_map_id = connection.execute("SELECT map_id FROM edges").fetchone()["map_id"]
+            self.assertEqual(len(story_maps), 1)
+            self.assertEqual(story_maps[0]["title"], "主故事线")
+            self.assertEqual(node_map_ids, {story_maps[0]["id"]})
+            self.assertEqual(edge_map_id, story_maps[0]["id"])
+        finally:
+            main.DATABASE_PATH = current_path
+
     def test_api_key_protects_writing_data(self):
         main.API_KEY = "test-secret"
         denied = self.client.get("/api/projects")

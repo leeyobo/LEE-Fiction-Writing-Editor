@@ -1,5 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+const REQUIRED_API_VERSION = "0.9.0";
 
 const state = {
   config: {
@@ -8,6 +9,10 @@ const state = {
   },
   projects: [],
   project: null,
+  activeMapId: null,
+  editingMapId: null,
+  pendingMapDeleteId: null,
+  mapViewStates: new Map(),
   activeChapterId: localStorage.getItem("motu.activeChapterId") || null,
   selectedNodeId: null,
   selectedNodeIds: new Set(),
@@ -85,6 +90,27 @@ let findPanelLayout = { ...findPanelLayoutDefaults };
 
 function normalizedServerUrl(value = state.config.serverUrl) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function versionParts(version) {
+  return String(version || "").split(".").slice(0, 3).map(part => Number.parseInt(part, 10) || 0);
+}
+
+function apiVersionIsCompatible(version) {
+  if (!version) return false;
+  const current = versionParts(version);
+  const required = versionParts(REQUIRED_API_VERSION);
+  for (let index = 0; index < 3; index += 1) {
+    if (current[index] > required[index]) return true;
+    if (current[index] < required[index]) return false;
+  }
+  return true;
+}
+
+function assertCompatibleApi(health) {
+  const version = health?.version || "未知";
+  if (apiVersionIsCompatible(version)) return;
+  throw new Error(`后端版本 ${version} 过旧，当前前端需要 ${REQUIRED_API_VERSION} 或更高版本。请停止旧服务后重新运行 python dev.py`);
 }
 
 async function api(path, options = {}) {
@@ -1187,6 +1213,23 @@ function activeChapter() {
   return state.project?.chapters.find(chapter => chapter.id === state.activeChapterId) || null;
 }
 
+function activeStoryMap() {
+  return state.project?.maps?.find(storyMap => storyMap.id === state.activeMapId) || null;
+}
+
+function activeMapNodes() {
+  return state.project?.nodes.filter(node => node.map_id === state.activeMapId) || [];
+}
+
+function activeMapEdges() {
+  return state.project?.edges.filter(edge => edge.map_id === state.activeMapId) || [];
+}
+
+function activeMapNotes() {
+  const nodeIds = new Set(activeMapNodes().map(node => node.id));
+  return state.project?.notes.filter(note => nodeIds.has(note.node_id)) || [];
+}
+
 function activeDocument() {
   return activeChapter();
 }
@@ -1206,7 +1249,8 @@ async function boot() {
 async function connect() {
   setSaveState("正在连接", "saving");
   try {
-    await api("/api/health");
+    const health = await api("/api/health");
+    assertCompatibleApi(health);
     state.projects = await api("/api/projects");
     if (!state.projects.length) {
       const created = await api("/api/projects", { method: "POST", body: JSON.stringify({ title: "我的第一部小说", description: "" }) });
@@ -1231,7 +1275,13 @@ async function loadProject(projectId) {
   state.editorHistories.clear();
   state.project = await api(`/api/projects/${projectId}`);
   state.project.notes ||= [];
+  state.project.maps ||= [];
   localStorage.setItem("motu.projectId", projectId);
+  const storedMapId = localStorage.getItem(`motu.activeMapId.${projectId}`);
+  state.activeMapId = state.project.maps.some(storyMap => storyMap.id === storedMapId)
+    ? storedMapId
+    : state.project.maps[0]?.id || null;
+  state.mapViewStates.clear();
   if (!state.project.chapters.some(chapter => chapter.id === state.activeChapterId)) {
     state.activeChapterId = state.project.chapters[0]?.id || null;
   }
@@ -1255,12 +1305,29 @@ async function loadProject(projectId) {
 function renderAll() {
   if (!state.project) return;
   $("#projectTitle").textContent = state.project.title;
+  renderStoryMaps();
   renderChapters();
   renderEditor();
   renderMap();
   renderChapterOptions();
   renderSplitChapterOptions();
   setSplitView(state.split.open);
+}
+
+function renderStoryMaps() {
+  if (!state.project) return;
+  const maps = state.project.maps || [];
+  const mapViewActive = $("#mapView")?.classList.contains("active");
+  $("#storyMapList").innerHTML = maps.map(storyMap => {
+    const nodeCount = state.project.nodes.filter(node => node.map_id === storyMap.id).length;
+    return `<li class="story-map-item ${mapViewActive && storyMap.id === state.activeMapId ? "active" : ""}" data-story-map-id="${storyMap.id}" title="${escapeHtml(storyMap.title)} · ${nodeCount} 个节点">
+      <span class="story-map-icon" aria-hidden="true">◇</span>
+      <span class="story-map-name">${escapeHtml(storyMap.title)}</span>
+      <span class="story-map-actions"><button type="button" data-rename-map="${storyMap.id}" title="重命名地图">改名</button><button type="button" data-delete-map="${storyMap.id}" title="${maps.length <= 1 ? "作品至少需要保留一张地图" : "删除地图"}" ${maps.length <= 1 ? "disabled" : ""}>删除</button></span>
+    </li>`;
+  }).join("");
+  const current = activeStoryMap();
+  $("#activeMapTitle").textContent = current?.title || "故事地图";
 }
 
 function chapterMatchesFilter(chapter, filter) {
@@ -1275,11 +1342,12 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
   $("#chapterBatchButton").textContent = state.chapterBulkMode ? "完成" : "批量删除";
   $("#chapterBatchButton").disabled = state.project.chapters.length <= 1;
   const chapters = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter));
+  const writeViewActive = $("#writeView")?.classList.contains("active");
   $("#chapterList").innerHTML = chapters.map(chapter => {
     const index = state.project.chapters.indexOf(chapter) + 1;
     const checked = state.selectedChapterIds.has(chapter.id);
     return `<li class="chapter-group ${checked ? "selected-for-delete" : ""}">
-      <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
+      <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${writeViewActive && chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
         ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
         <span class="chapter-number">${String(index).padStart(2, "0")}</span>
         <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong></span>
@@ -1318,9 +1386,10 @@ function renderLinkedNodes() {
   const nodes = state.project.nodes.filter(node => node.chapter_id === state.activeChapterId);
   const edges = state.project.edges.filter(edge => edge.chapter_id === state.activeChapterId);
   const nodeMap = new Map(state.project.nodes.map(node => [node.id, node.label]));
+  const storyMapNames = new Map(state.project.maps.map(storyMap => [storyMap.id, storyMap.title]));
   const pills = [
-    ...nodes.map(node => `<button class="linked-node-pill" type="button" data-linked-node-id="${node.id}">图形 · ${escapeHtml(node.label)}</button>`),
-    ...edges.map(edge => `<button class="linked-node-pill linked-edge-pill" type="button" data-linked-edge-id="${edge.id}">箭头 · ${escapeHtml(nodeMap.get(edge.source_id) || "起点")} → ${escapeHtml(nodeMap.get(edge.target_id) || "终点")}</button>`),
+    ...nodes.map(node => `<button class="linked-node-pill" type="button" data-linked-node-id="${node.id}">图形 · ${escapeHtml(node.label)} · ${escapeHtml(storyMapNames.get(node.map_id) || "故事地图")}</button>`),
+    ...edges.map(edge => `<button class="linked-node-pill linked-edge-pill" type="button" data-linked-edge-id="${edge.id}">箭头 · ${escapeHtml(nodeMap.get(edge.source_id) || "起点")} → ${escapeHtml(nodeMap.get(edge.target_id) || "终点")} · ${escapeHtml(storyMapNames.get(edge.map_id) || "故事地图")}</button>`),
   ];
   $("#linkedNodeBar").innerHTML = pills.length ? `<span class="linked-node-label">关联故事地图</span>${pills.join("")}` : "";
 }
@@ -1365,7 +1434,7 @@ function ensureCanvasState() {
 function expandCanvasBoundsForNodes() {
   if (!state.canvasBounds || !state.project) return;
   const limit = state.canvasAnchor || { x: 0, y: 0 };
-  state.project.nodes.forEach(node => {
+  activeMapNodes().forEach(node => {
     const size = nodeWorldSize(node);
     state.canvasBounds.minX = Math.max(limit.x - MAX_CANVAS_RADIUS, Math.min(state.canvasBounds.minX, node.x - CANVAS_GROWTH_MARGIN));
     state.canvasBounds.minY = Math.max(limit.y - MAX_CANVAS_RADIUS, Math.min(state.canvasBounds.minY, node.y - CANVAS_GROWTH_MARGIN));
@@ -1434,7 +1503,9 @@ function renderMinimap() {
   const viewport = $("#mapViewport"); const panel = $("#minimapPanel"); const svg = $("#minimapSvg");
   const bounds = state.canvasBounds;
   const width = Math.max(1, bounds.maxX - bounds.minX); const height = Math.max(1, bounds.maxY - bounds.minY);
-  const shouldShow = state.project.nodes.length >= 5 || width > viewport.clientWidth * 1.15 || height > viewport.clientHeight * 1.15 || Math.abs(state.camera.x) + Math.abs(state.camera.y) > 20;
+  const nodesForMap = activeMapNodes();
+  const edgesForMap = activeMapEdges();
+  const shouldShow = nodesForMap.length >= 5 || width > viewport.clientWidth * 1.15 || height > viewport.clientHeight * 1.15 || Math.abs(state.camera.x) + Math.abs(state.camera.y) > 20;
   panel.classList.toggle("hidden", !shouldShow);
   if (!shouldShow) return;
   const placedLeft = parseFloat(panel.style.left); const placedTop = parseFloat(panel.style.top);
@@ -1444,15 +1515,15 @@ function renderMinimap() {
   }
   svg.setAttribute("viewBox", `${bounds.minX} ${bounds.minY} ${width} ${height}`);
   svg.setAttribute("preserveAspectRatio", "none");
-  const nodeMap = new Map(state.project.nodes.map(node => [node.id, node]));
+  const nodeMap = new Map(nodesForMap.map(node => [node.id, node]));
   const colors = { blue: "#60a5fa", violet: "#8b5cf6", green: "#34d399", amber: "#f59e0b", rose: "#fb7185", slate: "#94a3b8" };
-  const edges = state.project.edges.map(edge => {
+  const edges = edgesForMap.map(edge => {
     const source = nodeMap.get(edge.source_id); const target = nodeMap.get(edge.target_id);
     if (!source || !target) return "";
     const sourceSize = nodeWorldSize(source); const targetSize = nodeWorldSize(target);
     return `<line x1="${source.x + sourceSize.width / 2}" y1="${source.y + sourceSize.height / 2}" x2="${target.x + targetSize.width / 2}" y2="${target.y + targetSize.height / 2}" stroke="${colors[edge.color] || colors.blue}"/>`;
   }).join("");
-  const nodes = state.project.nodes.map(node => {
+  const nodes = nodesForMap.map(node => {
     const size = nodeWorldSize(node);
     return `<rect x="${node.x}" y="${node.y}" width="${size.width}" height="${size.height}" rx="12" fill="${colors[node.color] || colors.blue}"/>`;
   }).join("");
@@ -1463,9 +1534,12 @@ function renderMinimap() {
 function renderMap() {
   if (!state.project) return;
   ensureCanvasState();
-  $("#clearCanvasButton").disabled = state.project.nodes.length === 0 && state.project.edges.length === 0;
+  const nodesForMap = activeMapNodes();
+  const edgesForMap = activeMapEdges();
+  renderStoryMaps();
+  $("#clearCanvasButton").disabled = nodesForMap.length === 0 && edgesForMap.length === 0;
   const chapterMap = new Map(state.project.chapters.map(chapter => [chapter.id, chapter.title]));
-  $("#nodeLayer").innerHTML = state.project.nodes.map(node => {
+  $("#nodeLayer").innerHTML = nodesForMap.map(node => {
     const notes = state.project.notes.filter(note => note.node_id === node.id);
     const noteCards = notes.map(note => `<div class="node-note-card ${note.locked ? "locked" : ""}" data-note-id="${note.id}" title="点击编辑便签">${escapeHtml(note.content)}</div>`).join("");
     const selected = node.id === state.selectedNodeId || state.selectedNodeIds.has(node.id);
@@ -1479,7 +1553,7 @@ function renderMap() {
     </div>
   </article>`;
   }).join("");
-  $("#mapEmpty").classList.toggle("hidden", state.project.nodes.length > 0);
+  $("#mapEmpty").classList.toggle("hidden", nodesForMap.length > 0);
   requestAnimationFrame(applyCamera);
 }
 
@@ -1487,7 +1561,7 @@ function renderEdges() {
   if (!state.project) return;
   const viewport = $("#mapViewport").getBoundingClientRect();
   const positions = new Map();
-  const shapeMap = new Map(state.project.nodes.map(node => [node.id, node.shape]));
+  const shapeMap = new Map(activeMapNodes().map(node => [node.id, node.shape]));
   $$(".story-node").forEach(element => {
     const rect = element.getBoundingClientRect();
     positions.set(element.dataset.nodeId, {
@@ -1502,7 +1576,7 @@ function renderEdges() {
     });
   });
   $("#edgeLayer").setAttribute("viewBox", `0 0 ${Math.max(1, viewport.width)} ${Math.max(1, viewport.height)}`);
-  const paths = state.project.edges.map(edge => {
+  const paths = activeMapEdges().map(edge => {
     const sourcePort = normalizedEdgePort(shapeMap.get(edge.source_id), edge.source_port || "right", "source");
     const targetPort = normalizedEdgePort(shapeMap.get(edge.target_id), edge.target_port || "left", "target");
     const source = positions.get(edge.source_id)?.[sourcePort];
@@ -1602,6 +1676,8 @@ function switchView(view) {
   } else if (state.split.open) {
     requestAnimationFrame(() => setSplitPaneWidth(state.split.width));
   }
+  renderStoryMaps();
+  renderChapters();
 }
 
 function queueDocumentSave() {
@@ -1639,6 +1715,121 @@ async function addChapter() {
   } catch (error) { toast(error.message); }
 }
 
+function rememberActiveMapView() {
+  if (!state.activeMapId || !state.canvasInitialized) return;
+  state.mapViewStates.set(state.activeMapId, {
+    camera: { ...state.camera },
+    anchor: state.canvasAnchor ? { ...state.canvasAnchor } : null,
+    bounds: state.canvasBounds ? { ...state.canvasBounds } : null,
+    initialized: state.canvasInitialized,
+  });
+}
+
+function restoreMapView(mapId) {
+  const saved = state.mapViewStates.get(mapId);
+  state.camera = saved?.camera ? { ...saved.camera } : { x: 0, y: 0 };
+  state.canvasAnchor = saved?.anchor ? { ...saved.anchor } : null;
+  state.canvasBounds = saved?.bounds ? { ...saved.bounds } : null;
+  state.canvasInitialized = Boolean(saved?.initialized);
+}
+
+function selectStoryMap(mapId, { openView = true } = {}) {
+  if (!state.project?.maps.some(storyMap => storyMap.id === mapId)) return;
+  if (state.activeMapId !== mapId) {
+    rememberActiveMapView();
+    state.activeMapId = mapId;
+    localStorage.setItem(`motu.activeMapId.${state.project.id}`, mapId);
+    restoreMapView(mapId);
+    state.selectedNodeId = null; state.selectedNodeIds.clear();
+    state.selectedEdgeId = null; state.selectedEdgeIds.clear();
+    state.connectSourceId = null;
+    $("#connectButton").classList.remove("active");
+    $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
+    $("#canvasContextMenu").hidden = true;
+    $(".inspector").classList.add("hidden");
+  }
+  renderStoryMaps();
+  renderMap();
+  if (openView) switchView("map");
+}
+
+function openStoryMapDialog(mapId = null) {
+  if (!requireProject(mapId ? "编辑故事地图" : "新建故事地图")) return;
+  state.editingMapId = mapId;
+  const storyMap = state.project?.maps.find(item => item.id === mapId);
+  $("#storyMapDialogTitle").textContent = storyMap ? "重命名故事地图" : "新建故事地图";
+  $("#saveStoryMapButton").textContent = storyMap ? "保存名称" : "创建地图";
+  $("#storyMapNameInput").value = storyMap?.title || `故事地图 ${(state.project.maps || []).length + 1}`;
+  $("#storyMapDialog").showModal();
+  requestAnimationFrame(() => $("#storyMapNameInput").select());
+}
+
+async function saveStoryMap() {
+  const title = $("#storyMapNameInput").value.trim();
+  if (!title) { $("#storyMapNameInput").focus(); return; }
+  const button = $("#saveStoryMapButton");
+  button.disabled = true;
+  try {
+    if (state.editingMapId) {
+      const updated = await api(`/api/maps/${state.editingMapId}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      Object.assign(state.project.maps.find(item => item.id === updated.id), updated);
+      renderStoryMaps();
+      toast("故事地图已重命名");
+    } else {
+      const created = await api(`/api/projects/${state.project.id}/maps`, { method: "POST", body: JSON.stringify({ title }) });
+      state.project.maps.push(created);
+      $("#storyMapDialog").close();
+      selectStoryMap(created.id);
+      toast("新故事地图已创建");
+      return;
+    }
+    $("#storyMapDialog").close();
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+}
+
+function openStoryMapDeleteDialog(mapId) {
+  const storyMap = state.project?.maps.find(item => item.id === mapId);
+  if (!storyMap) return;
+  if (state.project.maps.length <= 1) { toast("作品至少需要保留一张故事地图"); return; }
+  const nodes = state.project.nodes.filter(node => node.map_id === mapId);
+  const nodeIds = new Set(nodes.map(node => node.id));
+  const edges = state.project.edges.filter(edge => edge.map_id === mapId);
+  const notes = state.project.notes.filter(note => nodeIds.has(note.node_id));
+  state.pendingMapDeleteId = mapId;
+  $("#storyMapDeleteSummary").textContent = `将删除“${storyMap.title}”。`;
+  $("#storyMapDeleteDetails").textContent = `其中包含 ${nodes.length} 个节点、${edges.length} 条连接线和 ${notes.length} 条便签。`;
+  $("#storyMapDeleteDialog").showModal();
+}
+
+async function deletePendingStoryMap() {
+  const mapId = state.pendingMapDeleteId;
+  if (!mapId) return;
+  const button = $("#confirmStoryMapDeleteButton");
+  button.disabled = true;
+  try {
+    await api(`/api/maps/${mapId}`, { method: "DELETE" });
+    const deletedNodeIds = new Set(state.project.nodes.filter(node => node.map_id === mapId).map(node => node.id));
+    state.project.maps = state.project.maps.filter(item => item.id !== mapId);
+    state.project.nodes = state.project.nodes.filter(node => node.map_id !== mapId);
+    state.project.edges = state.project.edges.filter(edge => edge.map_id !== mapId);
+    state.project.notes = state.project.notes.filter(note => !deletedNodeIds.has(note.node_id));
+    state.mapViewStates.delete(mapId);
+    state.pendingMapDeleteId = null;
+    $("#storyMapDeleteDialog").close();
+    if (state.activeMapId === mapId) {
+      state.activeMapId = state.project.maps[0].id;
+      localStorage.setItem(`motu.activeMapId.${state.project.id}`, state.activeMapId);
+      restoreMapView(state.activeMapId);
+    }
+    clearCanvasSelection();
+    renderStoryMaps();
+    renderLinkedNodes();
+    toast("故事地图已删除，章节正文未受影响");
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+}
+
 async function addNode(type = "plot", shape = "rounded", position = null) {
   if (!requireProject("添加故事节点")) return;
   const viewport = $("#mapViewport");
@@ -1651,7 +1842,7 @@ async function addNode(type = "plot", shape = "rounded", position = null) {
       ellipse: "开始 / 结束", parallelogram: "输入 / 输出", hexagon: "新准备",
       document: "新文档", cylinder: "新数据",
     };
-    const node = await api(`/api/projects/${state.project.id}/nodes`, { method: "POST", body: JSON.stringify({ label: shapeNames[shape] || "新节点", node_type: type, shape, color: nodeTypeColors[type], x, y, note: "", chapter_id: null }) });
+    const node = await api(`/api/projects/${state.project.id}/nodes`, { method: "POST", body: JSON.stringify({ label: shapeNames[shape] || "新节点", node_type: type, shape, color: nodeTypeColors[type], x, y, note: "", chapter_id: null, map_id: state.activeMapId }) });
     state.project.nodes.push(node);
     state.selectedNodeId = node.id;
     state.selectedNodeIds = new Set([node.id]);
@@ -1807,6 +1998,7 @@ function openNodeLinkedContent(node) {
 function focusNodeOnMap(nodeId) {
   const node = state.project?.nodes.find(item => item.id === nodeId);
   if (!node) return;
+  selectStoryMap(node.map_id, { openView: false });
   state.selectedNodeId = nodeId;
   state.selectedNodeIds = new Set([nodeId]);
   state.selectedEdgeId = null;
@@ -1825,6 +2017,7 @@ function focusNodeOnMap(nodeId) {
 function focusEdgeOnMap(edgeId) {
   const edge = state.project?.edges.find(item => item.id === edgeId);
   if (!edge) return;
+  selectStoryMap(edge.map_id, { openView: false });
   state.selectedNodeId = null;
   state.selectedNodeIds.clear();
   state.selectedEdgeId = edgeId;
@@ -2275,6 +2468,20 @@ function bindCanvasSelection() {
 
 function bindEvents() {
   $$(".view-button").forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
+  $("#storyMapList").addEventListener("click", event => {
+    const renameButton = event.target.closest("[data-rename-map]");
+    if (renameButton) { openStoryMapDialog(renameButton.dataset.renameMap); return; }
+    const deleteButton = event.target.closest("[data-delete-map]");
+    if (deleteButton) { openStoryMapDeleteDialog(deleteButton.dataset.deleteMap); return; }
+    const item = event.target.closest("[data-story-map-id]");
+    if (item) selectStoryMap(item.dataset.storyMapId);
+  });
+  $("#addStoryMapButton").addEventListener("click", () => openStoryMapDialog());
+  $("#saveStoryMapButton").addEventListener("click", saveStoryMap);
+  $("#storyMapNameInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); saveStoryMap(); }
+  });
+  $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
   $("#chapterList").addEventListener("click", event => {
     const deleteButton = event.target.closest("[data-delete-chapter]");
     if (deleteButton) { openChapterDeleteDialog([deleteButton.dataset.deleteChapter]); return; }
@@ -2450,19 +2657,50 @@ function bindEvents() {
     if (item) { $("#projectDialog").close(); loadProject(item.dataset.projectId).catch(error => toast(error.message)); }
   });
   $$(".node-template").forEach(button => {
-    button.addEventListener("click", () => addNode(button.dataset.type, button.dataset.shape));
-    button.addEventListener("dragstart", event => {
-      event.dataTransfer.effectAllowed = "copy";
-      event.dataTransfer.setData("application/x-motu-shape", JSON.stringify({ type: button.dataset.type, shape: button.dataset.shape }));
+    button.addEventListener("click", event => {
+      if (event.detail === 0) addNode(button.dataset.type, button.dataset.shape);
     });
-  });
-  $("#mapViewport").addEventListener("dragover", event => { if (event.dataTransfer.types.includes("application/x-motu-shape")) event.preventDefault(); });
-  $("#mapViewport").addEventListener("drop", event => {
-    const raw = event.dataTransfer.getData("application/x-motu-shape");
-    if (!raw) return;
-    event.preventDefault();
-    const item = JSON.parse(raw); const rect = $("#mapViewport").getBoundingClientRect();
-    addNode(item.type, item.shape, { x: event.clientX - rect.left - state.camera.x - 80, y: event.clientY - rect.top - state.camera.y - 40 });
+    button.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const pointerId = event.pointerId;
+      const start = { x: event.clientX, y: event.clientY };
+      let moved = false;
+      button.setPointerCapture(pointerId);
+      button.classList.add("dragging");
+      const move = moveEvent => {
+        if (moveEvent.pointerId !== pointerId) return;
+        if (Math.hypot(moveEvent.clientX - start.x, moveEvent.clientY - start.y) > 6) moved = true;
+      };
+      const finish = upEvent => {
+        if (upEvent.pointerId !== pointerId) return;
+        button.removeEventListener("pointermove", move);
+        button.removeEventListener("pointerup", finish);
+        button.removeEventListener("pointercancel", cancel);
+        button.classList.remove("dragging");
+        if (!moved) {
+          addNode(button.dataset.type, button.dataset.shape);
+          return;
+        }
+        const viewport = $("#mapViewport");
+        const bounds = viewport.getBoundingClientRect();
+        if (upEvent.clientX < bounds.left || upEvent.clientX > bounds.right || upEvent.clientY < bounds.top || upEvent.clientY > bounds.bottom) return;
+        addNode(button.dataset.type, button.dataset.shape, {
+          x: upEvent.clientX - bounds.left - state.camera.x - 80,
+          y: upEvent.clientY - bounds.top - state.camera.y - 40,
+        });
+      };
+      const cancel = cancelEvent => {
+        if (cancelEvent.pointerId !== pointerId) return;
+        button.removeEventListener("pointermove", move);
+        button.removeEventListener("pointerup", finish);
+        button.removeEventListener("pointercancel", cancel);
+        button.classList.remove("dragging");
+      };
+      button.addEventListener("pointermove", move);
+      button.addEventListener("pointerup", finish);
+      button.addEventListener("pointercancel", cancel);
+    });
   });
   $("#mapViewport").addEventListener("click", event => {
     if (state.ignoreCanvasClick) { state.ignoreCanvasClick = false; return; }
@@ -2524,7 +2762,7 @@ function bindEvents() {
   });
   $("#emptyAddButton").addEventListener("click", () => addNode("plot", "rectangle"));
   $("#clearCanvasButton").addEventListener("click", openClearCanvasDialog);
-  $("#confirmClearCanvasButton").addEventListener("click", clearProjectCanvas);
+  $("#confirmClearCanvasButton").addEventListener("click", clearActiveMapCanvas);
   $("#connectButton").addEventListener("click", event => {
     event.currentTarget.classList.toggle("active"); state.connectSourceId = null;
     event.currentTarget.innerHTML = event.currentTarget.classList.contains("active") ? '<span class="arrow-preview">→</span>选起点' : '<span class="arrow-preview">→</span>箭头';
@@ -2619,7 +2857,9 @@ async function testConnection() {
   try {
     const response = await fetch(`${url}/api/health`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    result.textContent = "连接成功，服务器工作正常"; result.className = "connection-result ok";
+    const health = await response.json();
+    assertCompatibleApi(health);
+    result.textContent = `连接成功，服务器版本 ${health.version}`; result.className = "connection-result ok";
   } catch (error) {
     result.textContent = `连接失败：${error.message}`; result.className = "connection-result error";
   }
@@ -2718,24 +2958,25 @@ async function deletePendingChapters() {
 
 function openClearCanvasDialog() {
   if (!requireProject("清空画布")) return;
-  const nodes = state.project.nodes.length;
-  const edges = state.project.edges.length;
-  const notes = state.project.notes.length;
+  const nodes = activeMapNodes().length;
+  const edges = activeMapEdges().length;
+  const notes = activeMapNotes().length;
   if (!nodes && !edges) { toast("当前画布已经是空的"); return; }
-  $("#clearCanvasSummary").textContent = `将删除 ${nodes} 个节点、${edges} 条连接线和 ${notes} 条便签。`;
+  $("#clearCanvasSummary").textContent = `将清空“${activeStoryMap()?.title || "当前地图"}”：删除 ${nodes} 个节点、${edges} 条连接线和 ${notes} 条便签。`;
   $("#clearCanvasDialog").showModal();
 }
 
-async function clearProjectCanvas() {
+async function clearActiveMapCanvas() {
   if (!state.project) return;
   const button = $("#confirmClearCanvasButton");
   button.disabled = true;
   button.textContent = "正在清空…";
   try {
-    const result = await api(`/api/projects/${state.project.id}/canvas`, { method: "DELETE" });
-    state.project.nodes = [];
-    state.project.edges = [];
-    state.project.notes = [];
+    const result = await api(`/api/maps/${state.activeMapId}/canvas`, { method: "DELETE" });
+    const deletedNodeIds = new Set(activeMapNodes().map(node => node.id));
+    state.project.nodes = state.project.nodes.filter(node => node.map_id !== state.activeMapId);
+    state.project.edges = state.project.edges.filter(edge => edge.map_id !== state.activeMapId);
+    state.project.notes = state.project.notes.filter(note => !deletedNodeIds.has(note.node_id));
     state.selectedNodeId = null; state.selectedNodeIds.clear();
     state.selectedEdgeId = null; state.selectedEdgeIds.clear();
     state.connectSourceId = null;
@@ -2743,12 +2984,15 @@ async function clearProjectCanvas() {
     state.canvasAnchor = null;
     state.canvasBounds = null;
     state.canvasInitialized = false;
+    state.mapViewStates.delete(state.activeMapId);
     $("#connectButton").classList.remove("active");
     $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
     $(".inspector").classList.add("hidden");
     $("#clearCanvasDialog").close();
     renderMap();
-    toast(`画布已清空：${result.nodes} 个节点、${result.edges} 条连接线`);
+    renderStoryMaps();
+    renderLinkedNodes();
+    toast(`“${activeStoryMap()?.title || "故事地图"}”已清空：${result.nodes} 个节点、${result.edges} 条连接线`);
   } catch (error) {
     toast(error.message);
   } finally {

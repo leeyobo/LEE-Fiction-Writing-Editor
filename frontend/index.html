@@ -41,6 +41,10 @@
           </div>
           <label class="search-box"><span>⌕</span><input id="chapterSearch" type="search" placeholder="搜索章节" /></label>
           <div id="chapterBatchBar" class="chapter-batch-bar" hidden><label><input id="selectAllChapters" type="checkbox" />全选</label><span id="selectedChapterCount">已选 0 章</span><button id="deleteSelectedChaptersButton" type="button" disabled>删除所选</button></div>
+          <section class="story-map-list-section" aria-label="故事地图列表">
+            <div class="story-map-list-heading"><span>故事地图</span><button id="addStoryMapButton" type="button" title="新建故事地图" aria-label="新建故事地图">＋</button></div>
+            <ol id="storyMapList" class="story-map-list"></ol>
+          </section>
           <div class="volume-label"><span>第一卷</span><small id="chapterCount">0 章</small></div>
           <ol id="chapterList" class="chapter-list"></ol>
           <div class="sidebar-footer">
@@ -168,20 +172,20 @@
         <section id="mapView" class="map-view view-panel active">
           <div class="map-toolbar">
             <div class="map-toolbar-heading">
-              <div><p class="eyebrow">STORY MAP</p><h2>流程画布</h2></div>
+              <div><p class="eyebrow">STORY MAP</p><h2 id="activeMapTitle">主故事线</h2></div>
               <button id="classicInteractionToggle" class="map-mode-toggle" type="button" role="switch" aria-checked="false" title="切换回原来的框选与抓手操作方式"><span class="map-mode-toggle-track" aria-hidden="true"><i></i></span><span>经典操作</span></button>
             </div>
             <div class="flow-palette" aria-label="流程图形工具箱">
               <span class="palette-hint">拖到画布</span>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="rectangle" type="button" title="长方形"><i class="shape-preview rectangle"></i><span>长方形</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="rounded" type="button" title="圆角矩形"><i class="shape-preview rounded"></i><span>圆角</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="diamond" type="button" title="菱形"><i class="shape-preview diamond"></i><span>菱形</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="circle" type="button" title="圆形"><i class="shape-preview circle"></i><span>圆形</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="ellipse" type="button" title="椭圆"><i class="shape-preview ellipse"></i><span>椭圆</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="parallelogram" type="button" title="平行四边形"><i class="shape-preview parallelogram"></i><span>输入</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="hexagon" type="button" title="六边形"><i class="shape-preview hexagon"></i><span>六边形</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="document" type="button" title="文档"><i class="shape-preview document"></i><span>文档</span></button>
-              <button class="node-template" draggable="true" data-type="plot" data-shape="cylinder" type="button" title="数据库"><i class="shape-preview cylinder"></i><span>数据</span></button>
+              <button class="node-template" data-type="plot" data-shape="rectangle" type="button" title="长方形"><i class="shape-preview rectangle"></i><span>长方形</span></button>
+              <button class="node-template" data-type="plot" data-shape="rounded" type="button" title="圆角矩形"><i class="shape-preview rounded"></i><span>圆角</span></button>
+              <button class="node-template" data-type="plot" data-shape="diamond" type="button" title="菱形"><i class="shape-preview diamond"></i><span>菱形</span></button>
+              <button class="node-template" data-type="plot" data-shape="circle" type="button" title="圆形"><i class="shape-preview circle"></i><span>圆形</span></button>
+              <button class="node-template" data-type="plot" data-shape="ellipse" type="button" title="椭圆"><i class="shape-preview ellipse"></i><span>椭圆</span></button>
+              <button class="node-template" data-type="plot" data-shape="parallelogram" type="button" title="平行四边形"><i class="shape-preview parallelogram"></i><span>输入</span></button>
+              <button class="node-template" data-type="plot" data-shape="hexagon" type="button" title="六边形"><i class="shape-preview hexagon"></i><span>六边形</span></button>
+              <button class="node-template" data-type="plot" data-shape="document" type="button" title="文档"><i class="shape-preview document"></i><span>文档</span></button>
+              <button class="node-template" data-type="plot" data-shape="cylinder" type="button" title="数据库"><i class="shape-preview cylinder"></i><span>数据</span></button>
               <button id="connectButton" class="connect-button" type="button"><span class="arrow-preview">→</span>箭头</button>
               <button id="clearCanvasButton" class="clear-canvas-button" type="button" title="清空当前画布"><i class="clear-preview" aria-hidden="true"></i><span>清空</span></button>
             </div>
@@ -294,7 +298,7 @@
         <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DANGER ZONE</p><h2>确认清空画布？</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
         <div class="confirm-warning" aria-hidden="true">!</div>
         <p id="clearCanvasSummary" class="confirm-summary"></p>
-        <p class="modal-copy">所有流程图节点、连接线和节点便签都会永久删除，章节正文不会受到影响。</p>
+        <p class="modal-copy">只会清空当前故事地图中的节点、连接线和便签，其他地图与章节正文不会受到影响。</p>
         <p class="confirm-danger-copy">此操作无法撤销。</p>
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="confirmClearCanvasButton" class="danger-confirm-button" type="button">确认清空</button></div>
       </form>
@@ -308,6 +312,25 @@
         <p id="chapterDeleteDetails" class="modal-copy"></p>
         <p class="confirm-danger-copy">章节正文将永久删除，此操作无法撤销。</p>
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="confirmChapterDeleteButton" class="danger-confirm-button" type="button">确认删除</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="storyMapDialog" class="modal map-name-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">STORY MAP</p><h2 id="storyMapDialogTitle">新建故事地图</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
+        <label>地图名称<input id="storyMapNameInput" maxlength="120" placeholder="例如：主故事线、人物关系" autocomplete="off" /></label>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="saveStoryMapButton" class="wide-button" type="button">创建地图</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="storyMapDeleteDialog" class="modal confirm-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DELETE STORY MAP</p><h2>确认删除故事地图？</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
+        <div class="confirm-warning" aria-hidden="true">!</div>
+        <p id="storyMapDeleteSummary" class="confirm-summary"></p>
+        <p id="storyMapDeleteDetails" class="modal-copy"></p>
+        <p class="confirm-danger-copy">章节正文不会被删除，但此地图中的节点、连线和便签无法恢复。</p>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="confirmStoryMapDeleteButton" class="danger-confirm-button" type="button">确认删除</button></div>
       </form>
     </dialog>
 

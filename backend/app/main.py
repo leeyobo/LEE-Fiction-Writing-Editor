@@ -57,6 +57,15 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS story_maps (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS chapters (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -81,6 +90,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                map_id TEXT NOT NULL REFERENCES story_maps(id) ON DELETE CASCADE,
                 label TEXT NOT NULL,
                 note TEXT NOT NULL DEFAULT '',
                 node_type TEXT NOT NULL DEFAULT 'plot',
@@ -97,6 +107,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS edges (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                map_id TEXT NOT NULL REFERENCES story_maps(id) ON DELETE CASCADE,
                 source_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
                 target_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
                 label TEXT NOT NULL DEFAULT '',
@@ -121,6 +132,7 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_chapters_project ON chapters(project_id, position);
+            CREATE INDEX IF NOT EXISTS idx_story_maps_project ON story_maps(project_id, position);
             CREATE INDEX IF NOT EXISTS idx_scenes_chapter ON scenes(chapter_id, position);
             CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
             CREATE INDEX IF NOT EXISTS idx_edges_project ON edges(project_id);
@@ -128,11 +140,14 @@ def init_db() -> None:
             """
         )
         node_columns = {row["name"] for row in connection.execute("PRAGMA table_info(nodes)").fetchall()}
+        if "map_id" not in node_columns:
+            connection.execute("ALTER TABLE nodes ADD COLUMN map_id TEXT REFERENCES story_maps(id) ON DELETE CASCADE")
         if "scene_id" not in node_columns:
             connection.execute("ALTER TABLE nodes ADD COLUMN scene_id TEXT REFERENCES scenes(id) ON DELETE SET NULL")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_nodes_scene ON nodes(scene_id)")
         edge_columns = {row["name"] for row in connection.execute("PRAGMA table_info(edges)").fetchall()}
         edge_migrations = {
+            "map_id": "ALTER TABLE edges ADD COLUMN map_id TEXT REFERENCES story_maps(id) ON DELETE CASCADE",
             "chapter_id": "ALTER TABLE edges ADD COLUMN chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL",
             "line_style": "ALTER TABLE edges ADD COLUMN line_style TEXT NOT NULL DEFAULT 'solid'",
             "color": "ALTER TABLE edges ADD COLUMN color TEXT NOT NULL DEFAULT 'blue'",
@@ -142,6 +157,33 @@ def init_db() -> None:
         for column, statement in edge_migrations.items():
             if column not in edge_columns:
                 connection.execute(statement)
+        project_rows = connection.execute("SELECT id, created_at, updated_at FROM projects").fetchall()
+        for project in project_rows:
+            story_map = connection.execute(
+                "SELECT id FROM story_maps WHERE project_id = ? ORDER BY position, created_at LIMIT 1",
+                (project["id"],),
+            ).fetchone()
+            if not story_map:
+                map_id = new_id("map")
+                connection.execute(
+                    """INSERT INTO story_maps(id, project_id, title, position, created_at, updated_at)
+                       VALUES (?, ?, '主故事线', 0, ?, ?)""",
+                    (map_id, project["id"], project["created_at"], project["updated_at"]),
+                )
+            else:
+                map_id = story_map["id"]
+            connection.execute(
+                "UPDATE nodes SET map_id = ? WHERE project_id = ? AND map_id IS NULL",
+                (map_id, project["id"]),
+            )
+            connection.execute(
+                """UPDATE edges SET map_id = COALESCE(
+                       (SELECT n.map_id FROM nodes n WHERE n.id = edges.source_id), ?
+                   ) WHERE project_id = ? AND map_id IS NULL""",
+                (map_id, project["id"]),
+            )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_nodes_map ON nodes(map_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_edges_map ON edges(map_id)")
         scene_projects = connection.execute(
             "SELECT DISTINCT project_id FROM scenes ORDER BY project_id"
         ).fetchall()
@@ -203,6 +245,15 @@ class ProjectCreate(BaseModel):
     description: str = Field(default="", max_length=1000)
 
 
+class StoryMapCreate(BaseModel):
+    title: str = Field(default="新故事地图", min_length=1, max_length=120)
+
+
+class StoryMapUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    position: Optional[int] = Field(default=None, ge=0)
+
+
 class ChapterCreate(BaseModel):
     title: str = Field(default="新章节", min_length=1, max_length=120)
 
@@ -244,6 +295,7 @@ class NodeCreate(BaseModel):
     x: float = 0
     y: float = 0
     chapter_id: Optional[str] = None
+    map_id: Optional[str] = None
 
 
 class NodeUpdate(BaseModel):
@@ -282,7 +334,7 @@ class EdgeUpdate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.8.0",
+    version="0.9.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -300,7 +352,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.8.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.9.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -316,11 +368,17 @@ def list_projects():
 def create_project(payload: ProjectCreate):
     project_id = new_id("project")
     chapter_id = new_id("chapter")
+    map_id = new_id("map")
     timestamp = now()
     with db() as connection:
         connection.execute(
             "INSERT INTO projects(id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (project_id, payload.title, payload.description, timestamp, timestamp),
+        )
+        connection.execute(
+            """INSERT INTO story_maps(id, project_id, title, position, created_at, updated_at)
+               VALUES (?, ?, '主故事线', 0, ?, ?)""",
+            (map_id, project_id, timestamp, timestamp),
         )
         connection.execute(
             "INSERT INTO chapters(id, project_id, title, content, position, created_at, updated_at) VALUES (?, ?, ?, '', 0, ?, ?)",
@@ -338,6 +396,9 @@ def get_project(project_id: str):
         chapters = connection.execute(
             "SELECT * FROM chapters WHERE project_id = ? ORDER BY position, created_at", (project_id,)
         ).fetchall()
+        story_maps = connection.execute(
+            "SELECT * FROM story_maps WHERE project_id = ? ORDER BY position, created_at", (project_id,)
+        ).fetchall()
         nodes = connection.execute("SELECT * FROM nodes WHERE project_id = ?", (project_id,)).fetchall()
         edges = connection.execute("SELECT * FROM edges WHERE project_id = ?", (project_id,)).fetchall()
         notes = connection.execute(
@@ -345,11 +406,98 @@ def get_project(project_id: str):
         ).fetchall()
     return {
         **dict(project),
+        "maps": [dict(row) for row in story_maps],
         "chapters": [dict(row) for row in chapters],
         "nodes": [serialize_node(row) for row in nodes],
         "edges": [dict(row) for row in edges],
         "notes": [{**dict(row), "locked": bool(row["locked"])} for row in notes],
     }
+
+
+@app.post("/api/projects/{project_id}/maps", status_code=201, dependencies=[Depends(authorize)])
+def create_story_map(project_id: str, payload: StoryMapCreate):
+    map_id = new_id("map")
+    timestamp = now()
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM story_maps WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()["position"]
+        connection.execute(
+            """INSERT INTO story_maps(id, project_id, title, position, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (map_id, project_id, payload.title, position, timestamp, timestamp),
+        )
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
+        row = connection.execute("SELECT * FROM story_maps WHERE id = ?", (map_id,)).fetchone()
+    return dict(row)
+
+
+@app.patch("/api/maps/{map_id}", dependencies=[Depends(authorize)])
+def update_story_map(map_id: str, payload: StoryMapUpdate):
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段")
+    changes["updated_at"] = now()
+    with db() as connection:
+        story_map = connection.execute("SELECT project_id FROM story_maps WHERE id = ?", (map_id,)).fetchone()
+        if not story_map:
+            raise HTTPException(status_code=404, detail="故事地图不存在")
+        assignments = ", ".join(f"{column} = ?" for column in changes)
+        connection.execute(f"UPDATE story_maps SET {assignments} WHERE id = ?", (*changes.values(), map_id))
+        connection.execute(
+            "UPDATE projects SET updated_at = ? WHERE id = ?",
+            (changes["updated_at"], story_map["project_id"]),
+        )
+        row = connection.execute("SELECT * FROM story_maps WHERE id = ?", (map_id,)).fetchone()
+    return dict(row)
+
+
+@app.delete("/api/maps/{map_id}", status_code=204, dependencies=[Depends(authorize)])
+def delete_story_map(map_id: str):
+    with db() as connection:
+        story_map = connection.execute("SELECT project_id FROM story_maps WHERE id = ?", (map_id,)).fetchone()
+        if not story_map:
+            raise HTTPException(status_code=404, detail="故事地图不存在")
+        count = connection.execute(
+            "SELECT COUNT(*) AS count FROM story_maps WHERE project_id = ?", (story_map["project_id"],)
+        ).fetchone()["count"]
+        if count <= 1:
+            raise HTTPException(status_code=409, detail="作品至少需要保留一张故事地图")
+        connection.execute("DELETE FROM story_maps WHERE id = ?", (map_id,))
+        remaining = connection.execute(
+            "SELECT id FROM story_maps WHERE project_id = ? ORDER BY position, created_at",
+            (story_map["project_id"],),
+        ).fetchall()
+        for position, item in enumerate(remaining):
+            connection.execute("UPDATE story_maps SET position = ? WHERE id = ?", (position, item["id"]))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now(), story_map["project_id"]))
+    return Response(status_code=204)
+
+
+@app.delete("/api/maps/{map_id}/canvas", dependencies=[Depends(authorize)])
+def clear_story_map_canvas(map_id: str):
+    with db() as connection:
+        story_map = connection.execute("SELECT project_id FROM story_maps WHERE id = ?", (map_id,)).fetchone()
+        if not story_map:
+            raise HTTPException(status_code=404, detail="故事地图不存在")
+        node_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM nodes WHERE map_id = ?", (map_id,)
+        ).fetchone()["count"]
+        edge_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM edges WHERE map_id = ?", (map_id,)
+        ).fetchone()["count"]
+        note_count = connection.execute(
+            """SELECT COUNT(*) AS count FROM node_notes
+               WHERE node_id IN (SELECT id FROM nodes WHERE map_id = ?)""",
+            (map_id,),
+        ).fetchone()["count"]
+        connection.execute("DELETE FROM nodes WHERE map_id = ?", (map_id,))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (now(), story_map["project_id"]))
+    return {"nodes": node_count, "edges": edge_count, "notes": note_count}
 
 
 @app.delete("/api/projects/{project_id}/canvas", dependencies=[Depends(authorize)])
@@ -465,6 +613,17 @@ def create_node(project_id: str, payload: NodeCreate):
         project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
         if not project:
             raise HTTPException(status_code=404, detail="作品不存在")
+        if values["map_id"]:
+            story_map = connection.execute(
+                "SELECT id FROM story_maps WHERE id = ? AND project_id = ?", (values["map_id"], project_id)
+            ).fetchone()
+        else:
+            story_map = connection.execute(
+                "SELECT id FROM story_maps WHERE project_id = ? ORDER BY position, created_at LIMIT 1", (project_id,)
+            ).fetchone()
+        if not story_map:
+            raise HTTPException(status_code=400, detail="故事地图不存在或不属于当前作品")
+        values["map_id"] = story_map["id"]
         if values["chapter_id"]:
             linked = connection.execute(
                 "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (values["chapter_id"], project_id)
@@ -472,9 +631,9 @@ def create_node(project_id: str, payload: NodeCreate):
             if not linked:
                 raise HTTPException(status_code=400, detail="链接的章节不属于当前作品")
         connection.execute(
-            """INSERT INTO nodes(id, project_id, label, note, node_type, shape, color, x, y, chapter_id, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (node_id, project_id, values["label"], values["note"], values["node_type"], values["shape"],
+            """INSERT INTO nodes(id, project_id, map_id, label, note, node_type, shape, color, x, y, chapter_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (node_id, project_id, values["map_id"], values["label"], values["note"], values["node_type"], values["shape"],
              values["color"], values["x"], values["y"], values["chapter_id"], timestamp, timestamp),
         )
         row = connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
@@ -567,12 +726,16 @@ def create_edge(project_id: str, payload: EdgeCreate):
     edge_id = new_id("edge")
     timestamp = now()
     with db() as connection:
-        node_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM nodes WHERE project_id = ? AND id IN (?, ?)",
+        nodes = connection.execute(
+            "SELECT id, map_id FROM nodes WHERE project_id = ? AND id IN (?, ?)",
             (project_id, payload.source_id, payload.target_id),
-        ).fetchone()["count"]
-        if node_count != 2:
+        ).fetchall()
+        if len(nodes) != 2:
             raise HTTPException(status_code=400, detail="连线节点不属于当前作品")
+        map_ids = {node["map_id"] for node in nodes}
+        if len(map_ids) != 1:
+            raise HTTPException(status_code=400, detail="不能连接不同故事地图中的节点")
+        map_id = next(iter(map_ids))
         if payload.chapter_id:
             chapter = connection.execute(
                 "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (payload.chapter_id, project_id)
@@ -582,11 +745,11 @@ def create_edge(project_id: str, payload: EdgeCreate):
         try:
             connection.execute(
                 """INSERT INTO edges(
-                       id, project_id, source_id, target_id, label, chapter_id,
+                       id, project_id, map_id, source_id, target_id, label, chapter_id,
                        line_style, color, source_port, target_port, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    edge_id, project_id, payload.source_id, payload.target_id, payload.label,
+                    edge_id, project_id, map_id, payload.source_id, payload.target_id, payload.label,
                     payload.chapter_id, payload.line_style, payload.color,
                     payload.source_port, payload.target_port, timestamp,
                 ),
