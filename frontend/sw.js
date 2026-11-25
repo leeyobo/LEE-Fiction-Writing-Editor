@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v38-volume-management";
+const CACHE = "motu-shell-v39-collapsible-volumes";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

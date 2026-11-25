@@ -92,7 +92,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .volume-group { margin: 0 0 10px; padding: 0; list-style: none; }
 .volume-group + .volume-group { margin-top: 7px; padding-top: 8px; border-top: 1px solid var(--line); }
 .volume-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 5px 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
-.volume-label-info { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.volume-label-info { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+.volume-collapse-button { display: grid; flex: 0 0 18px; place-items: center; width: 18px; height: 22px; padding: 0; border: 0; border-radius: 5px; color: #7185a3; background: transparent; cursor: pointer; font-size: 15px; line-height: 1; }
+.volume-collapse-button:hover { color: #1d4ed8; background: #e8f0ff; }
+.volume-collapse-button:focus-visible { outline: 2px solid rgba(37,99,235,.35); outline-offset: 1px; }
 .volume-label-info small { color: var(--muted); font-size: 11px; }
 .volume-label-info strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
 .volume-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; opacity: 0; pointer-events: none; transition: opacity .14s ease; }
@@ -103,6 +106,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .volume-actions .volume-delete-button:hover { color: #9f2638; border-color: #e9aab4; background: #fff0f2; }
 .volume-actions button:disabled { opacity: .42; cursor: not-allowed; }
 .volume-chapter-list { margin: 0; padding: 0; list-style: none; }
+.volume-chapter-list[hidden] { display: none; }
 .chapter-list { min-height: 0; flex: 1; list-style: none; padding: 0; margin: 0; overflow: auto; }
 .chapter-group { list-style: none; margin: 0 0 4px; }
 .chapter-item { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; min-height: 50px; margin-bottom: 4px; padding: 7px 9px; border-radius: 11px; cursor: pointer; }
@@ -577,6 +581,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .chapter-item.active { color: #e8f1ff; background: #2a3c59; box-shadow: inset 3px 0 0 #60a5fa; }
 .night-mode .story-map-list-heading button, .night-mode .story-map-icon { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
 .night-mode .add-volume-button, .night-mode .volume-actions button { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .volume-collapse-button { color: #a8b8cf; }
+.night-mode .volume-collapse-button:hover { color: #bfdbfe; background: #263a59; }
 .night-mode .volume-actions .volume-delete-button { color: #f0a2ad; border-color: #754554; background: #33232c; }
 .night-mode .volume-actions .volume-delete-button:hover { color: #ffd6dc; border-color: #a95c6b; background: #422b36; }
 .night-mode .add-volume-button:hover, .night-mode .volume-actions button:not(.volume-delete-button):hover { color: white; border-color: #3b82f6; background: #2563eb; }

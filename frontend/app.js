@@ -28,6 +28,7 @@ const state = {
   selectedChapterIds: new Set(),
   pendingChapterDeleteIds: [],
   pendingVolumeDeleteId: null,
+  collapsedVolumeIds: new Set(),
   camera: { x: 0, y: 0 },
   canvasAnchor: null,
   canvasBounds: null,
@@ -1296,6 +1297,11 @@ async function loadProject(projectId) {
   state.selectedChapterIds.clear();
   state.pendingChapterDeleteIds = [];
   state.pendingVolumeDeleteId = null;
+  try {
+    state.collapsedVolumeIds = new Set(JSON.parse(localStorage.getItem(`motu.collapsedVolumes.${projectId}`) || "[]"));
+  } catch (_) {
+    state.collapsedVolumeIds = new Set();
+  }
   state.camera = { x: 0, y: 0 };
   state.canvasAnchor = null;
   state.canvasBounds = null;
@@ -1358,7 +1364,10 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
   const chapters = state.project.chapters.filter(chapter => chapterMatchesFilter(chapter, filter));
   const totalVolumes = state.project.volumes.length;
   const writeViewActive = $("#writeView")?.classList.contains("active");
-  $("#chapterList").innerHTML = state.project.volumes.map(volume => {
+  const visibleVolumes = filter
+    ? state.project.volumes.filter(volume => chapters.some(chapter => chapter.volume_id === volume.id))
+    : state.project.volumes;
+  $("#chapterList").innerHTML = visibleVolumes.map(volume => {
     const volumeChapters = chapters.filter(chapter => chapter.volume_id === volume.id);
     const volumeTotal = state.project.chapters.filter(chapter => chapter.volume_id === volume.id).length;
     const chapterRows = volumeChapters.map(chapter => {
@@ -1373,12 +1382,13 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
         </div>
       </li>`;
     }).join("");
+    const collapsed = !filter && state.collapsedVolumeIds.has(volume.id);
     return `<li class="volume-group">
       <div class="volume-label">
-        <div class="volume-label-info"><strong>${escapeHtml(volume.title)}</strong><small>${volumeTotal} 章</small></div>
+        <div class="volume-label-info"><button class="volume-collapse-button" type="button" data-toggle-volume="${volume.id}" aria-controls="volume-chapters-${volume.id}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "展开" : "折叠"}${escapeHtml(volume.title)}">${collapsed ? "▸" : "▾"}</button><strong>${escapeHtml(volume.title)}</strong><small>${volumeTotal} 章</small></div>
         <div class="volume-actions"><button class="volume-add-chapter" type="button" data-add-chapter-volume="${volume.id}" title="在${escapeHtml(volume.title)}中新建章节">＋ 章节</button><button class="volume-delete-button" type="button" data-delete-volume="${volume.id}" title="删除故事卷" ${totalVolumes <= 1 ? "disabled" : ""}>删卷</button></div>
       </div>
-      <ol class="volume-chapter-list">${chapterRows}</ol>
+      <ol id="volume-chapters-${volume.id}" class="volume-chapter-list" ${collapsed ? "hidden" : ""}>${chapterRows}</ol>
     </li>`;
   }).join("");
   const selectedCount = state.selectedChapterIds.size;
@@ -1673,8 +1683,12 @@ function connectorPath(source, target, sourcePort, targetPort) {
 }
 
 function selectChapter(chapterId) {
-  if (!state.project?.chapters.some(chapter => chapter.id === chapterId)) return;
+  const chapter = state.project?.chapters.find(item => item.id === chapterId);
+  if (!chapter) return;
   if (state.activeChapterId !== chapterId) flushEditorHistory();
+  if (state.collapsedVolumeIds.delete(chapter.volume_id)) {
+    localStorage.setItem(`motu.collapsedVolumes.${state.project.id}`, JSON.stringify([...state.collapsedVolumeIds]));
+  }
   state.activeChapterId = chapterId;
   localStorage.setItem("motu.activeChapterId", chapterId);
   renderChapters();
@@ -1797,6 +1811,8 @@ async function deletePendingVolume() {
   try {
     const result = await api(`/api/volumes/${volumeId}`, { method: "DELETE" });
     state.project.volumes = state.project.volumes.filter(volume => volume.id !== volumeId);
+    state.collapsedVolumeIds.delete(volumeId);
+    localStorage.setItem(`motu.collapsedVolumes.${state.project.id}`, JSON.stringify([...state.collapsedVolumeIds]));
     state.project.chapters.forEach(chapter => {
       if (chapter.volume_id === volumeId) chapter.volume_id = result.target_volume_id;
     });
@@ -2623,6 +2639,15 @@ function bindEvents() {
   });
   $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
   $("#chapterList").addEventListener("click", event => {
+    const toggleVolumeButton = event.target.closest("[data-toggle-volume]");
+    if (toggleVolumeButton) {
+      const volumeId = toggleVolumeButton.dataset.toggleVolume;
+      if (state.collapsedVolumeIds.has(volumeId)) state.collapsedVolumeIds.delete(volumeId);
+      else state.collapsedVolumeIds.add(volumeId);
+      localStorage.setItem(`motu.collapsedVolumes.${state.project.id}`, JSON.stringify([...state.collapsedVolumeIds]));
+      renderChapters();
+      return;
+    }
     const addChapterButton = event.target.closest("[data-add-chapter-volume]");
     if (addChapterButton) { addChapterToVolume(addChapterButton.dataset.addChapterVolume); return; }
     const deleteVolumeButton = event.target.closest("[data-delete-volume]");
