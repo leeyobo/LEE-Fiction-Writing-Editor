@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v30-compact-chapter-list";
+const CACHE = "motu-shell-v31-node-context-actions";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

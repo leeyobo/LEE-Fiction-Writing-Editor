@@ -415,20 +415,6 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .node-note-card:not(.locked) { display: none; }
 .story-node:hover .node-note-card { display: block; }
 .node-note-card.locked::after { content: "锁"; position: absolute; top: 8px; right: 9px; color: #9a7420; font-size: 10px; font-weight: 700; }
-.node-quick-actions { position: absolute; z-index: 18; display: flex; align-items: center; gap: 5px; padding: 5px; border: 1px solid #cadaef; border-radius: 11px; background: rgba(255,255,255,.97); box-shadow: 0 12px 32px rgba(31,72,133,.18); }
-.node-quick-actions[hidden] { display: none; }
-.node-quick-actions > button { height: 31px; padding: 0 10px; border: 0; border-radius: 7px; color: #234b82; background: transparent; cursor: pointer; font-size: 12px; }
-.node-quick-actions > button:hover { background: #eaf3ff; }
-.quick-color-palette { display: flex; }
-#quickColorPalette { position: absolute; top: calc(100% + 6px); right: 0; display: flex; gap: 6px; padding: 7px; border: 1px solid var(--line); border-radius: 9px; background: white; box-shadow: var(--shadow); }
-#quickColorPalette[hidden] { display: none; }
-#quickColorPalette button { width: 23px; height: 23px; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 0 1px #b9cbe3; cursor: pointer; }
-#quickColorPalette [data-quick-color="blue"] { background: #2563eb; }
-#quickColorPalette [data-quick-color="violet"] { background: #7c3aed; }
-#quickColorPalette [data-quick-color="green"] { background: #0f9f78; }
-#quickColorPalette [data-quick-color="amber"] { background: #e59a28; }
-#quickColorPalette [data-quick-color="rose"] { background: #dc5670; }
-#quickColorPalette [data-quick-color="slate"] { background: #64748b; }
 .map-empty { position: absolute; left: 50%; top: 50%; display: grid; justify-items: center; width: 340px; padding: 28px; transform: translate(-50%,-50%); text-align: center; }
 .map-empty.hidden { display: none; }
 .empty-glyph { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 18px; background: #e3efff; color: var(--accent); font-size: 24px; }
@@ -438,11 +424,21 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .map-help { position: absolute; left: 20px; bottom: 18px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: rgba(255,255,255,.9); font-size: 11px; }
 .selection-rect { position: absolute; z-index: 16; border: 1px solid #2563eb; background: rgba(37,99,235,.10); pointer-events: none; }
 .selection-rect[hidden] { display: none; }
-.canvas-context-menu { position: absolute; z-index: 40; width: 150px; padding: 6px; border: 1px solid #c9d9ee; border-radius: 10px; background: white; box-shadow: 0 16px 44px rgba(31,72,133,.20); }
+.canvas-context-menu { position: absolute; z-index: 40; width: 174px; padding: 6px; border: 1px solid #c9d9ee; border-radius: 10px; background: white; box-shadow: 0 16px 44px rgba(31,72,133,.20); }
 .canvas-context-menu[hidden] { display: none; }
 .canvas-context-menu button { width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; text-align: left; font-size: 12px; }
 .canvas-context-menu button:hover { background: #eaf3ff; }
 .canvas-context-menu [data-context-action="delete"] { color: #c64e5b; }
+.context-menu-separator { display: block; height: 1px; margin: 5px 4px; background: var(--line); }
+.context-color-palette { display: grid; grid-template-columns: repeat(6,1fr); gap: 5px; padding: 7px 5px; }
+.context-color-palette[hidden] { display: none; }
+.canvas-context-menu .context-color-palette button { width: 20px; height: 20px; padding: 0; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 0 1px #b9cbe3; }
+.context-color-palette [data-quick-color="blue"] { background: #2563eb; }
+.context-color-palette [data-quick-color="violet"] { background: #7c3aed; }
+.context-color-palette [data-quick-color="green"] { background: #0f9f78; }
+.context-color-palette [data-quick-color="amber"] { background: #e59a28; }
+.context-color-palette [data-quick-color="rose"] { background: #dc5670; }
+.context-color-palette [data-quick-color="slate"] { background: #64748b; }
 
 .inspector { position: absolute; z-index: 12; right: 0; top: 0; bottom: 0; width: var(--inspector); padding: 25px 22px; background: white; border-left: 1px solid var(--line); box-shadow: -20px 0 50px rgba(29,32,51,.06); transition: transform .2s ease; overflow: auto; }
 .inspector.hidden { transform: translateX(100%); pointer-events: none; }

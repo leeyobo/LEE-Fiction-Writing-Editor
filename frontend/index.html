@@ -192,15 +192,6 @@
             </svg>
             <div id="nodeLayer" class="node-layer"></div>
             <div id="selectionRect" class="selection-rect" hidden></div>
-            <div id="nodeQuickActions" class="node-quick-actions" hidden>
-              <button type="button" data-node-action="note">便签</button>
-              <button type="button" data-node-action="link">连接章节</button>
-              <button type="button" data-node-action="color">颜色</button>
-              <button type="button" data-node-action="settings">设置</button>
-              <div id="quickColorPalette" class="quick-color-palette" hidden>
-                <button type="button" data-quick-color="blue" aria-label="蓝色"></button><button type="button" data-quick-color="violet" aria-label="紫色"></button><button type="button" data-quick-color="green" aria-label="绿色"></button><button type="button" data-quick-color="amber" aria-label="橙色"></button><button type="button" data-quick-color="rose" aria-label="红色"></button><button type="button" data-quick-color="slate" aria-label="灰色"></button>
-              </div>
-            </div>
             <div id="mapEmpty" class="map-empty">
               <div class="empty-glyph">✦</div><h3>让故事在这里展开</h3>
               <p>从上方工具箱拖入图形，用箭头连接，再为图形添加便签或章节链接。</p>
@@ -214,6 +205,14 @@
             </aside>
             <div id="canvasContextMenu" class="canvas-context-menu" hidden>
               <button type="button" data-context-action="edit-edge">编辑连线</button>
+              <button type="button" data-context-action="note" data-node-context>便签</button>
+              <button type="button" data-context-action="link" data-node-context>连接章节</button>
+              <button type="button" data-context-action="color" data-node-context aria-expanded="false">颜色</button>
+              <div id="quickColorPalette" class="context-color-palette" hidden>
+                <button type="button" data-quick-color="blue" aria-label="蓝色"></button><button type="button" data-quick-color="violet" aria-label="紫色"></button><button type="button" data-quick-color="green" aria-label="绿色"></button><button type="button" data-quick-color="amber" aria-label="橙色"></button><button type="button" data-quick-color="rose" aria-label="红色"></button><button type="button" data-quick-color="slate" aria-label="灰色"></button>
+              </div>
+              <button type="button" data-context-action="settings" data-node-context>设置</button>
+              <span class="context-menu-separator" aria-hidden="true"></span>
               <button type="button" data-context-action="delete">删除所选</button>
               <button type="button" data-context-action="clear">取消选择</button>
             </div>

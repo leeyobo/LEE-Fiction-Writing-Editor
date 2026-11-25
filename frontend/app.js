@@ -1402,7 +1402,6 @@ function applyCamera() {
   expandCanvasBoundsToVisible();
   $("#nodeLayer").style.transform = `translate(${state.camera.x}px, ${state.camera.y}px)`;
   $("#mapViewport").style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
-  if (state.selectedNodeId) positionQuickActions(state.selectedNodeId);
   renderEdges();
   renderMinimap();
 }
@@ -1660,21 +1659,7 @@ async function addNode(type = "plot", shape = "rounded", position = null) {
     state.selectedEdgeIds.clear();
     expandCanvasBoundsForNodes();
     renderMap();
-    positionQuickActions(node.id);
   } catch (error) { toast(error.message); }
-}
-
-function positionQuickActions(nodeId) {
-  const node = state.project?.nodes.find(item => item.id === nodeId);
-  const element = document.querySelector(`.story-node[data-node-id="${nodeId}"]`);
-  const bar = $("#nodeQuickActions");
-  if (!node || !element) { bar.hidden = true; return; }
-  bar.hidden = false;
-  bar.style.left = `${Math.max(8, node.x + state.camera.x + element.offsetWidth / 2)}px`;
-  bar.style.top = `${Math.max(8, node.y + state.camera.y - 54)}px`;
-  bar.style.transform = "translateX(-50%)";
-  const linkButton = bar.querySelector('[data-node-action="link"]');
-  linkButton.textContent = node.chapter_id ? "更改章节" : "连接章节";
 }
 
 function selectNodeForActions(nodeId) {
@@ -1682,9 +1667,7 @@ function selectNodeForActions(nodeId) {
   state.selectedNodeIds = new Set([nodeId]);
   state.selectedEdgeId = null;
   state.selectedEdgeIds.clear();
-  $("#quickColorPalette").hidden = true;
   renderMap();
-  requestAnimationFrame(() => positionQuickActions(nodeId));
 }
 
 function notesForSelectedNode() {
@@ -2028,7 +2011,6 @@ function bindNodeInteractions() {
       node.y = originY + dy;
       element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; renderEdges();
       expandCanvasBoundsForNodes(); renderMinimap();
-      if (state.selectedNodeId === node.id) positionQuickActions(node.id);
     };
     const up = () => {
       element.removeEventListener("pointermove", move); element.removeEventListener("pointerup", up);
@@ -2042,7 +2024,12 @@ function bindNodeInteractions() {
     const element = event.target.closest(".story-node");
     if (!element) return;
     if (event.target.closest(".node-port")) return;
-    if (event.target.closest(".node-menu-button")) { selectNodeForActions(element.dataset.nodeId); return; }
+    if (event.target.closest(".node-menu-button")) {
+      selectNodeForActions(element.dataset.nodeId);
+      const buttonRect = event.target.closest(".node-menu-button").getBoundingClientRect();
+      showCanvasContextMenu(buttonRect.right, buttonRect.bottom + 4);
+      return;
+    }
     const noteCard = event.target.closest(".node-note-card");
     if (noteCard) { state.selectedNodeId = element.dataset.nodeId; openNoteDialog(noteCard.dataset.noteId); return; }
     if ($("#connectButton").classList.contains("active")) connectNode(element.dataset.nodeId);
@@ -2054,7 +2041,6 @@ function clearCanvasSelection() {
   state.selectedNodeIds.clear();
   state.selectedEdgeId = null;
   state.selectedEdgeIds.clear();
-  $("#nodeQuickActions").hidden = true;
   $("#canvasContextMenu").hidden = true;
   renderMap();
 }
@@ -2064,11 +2050,17 @@ function showCanvasContextMenu(clientX, clientY) {
   const menu = $("#canvasContextMenu");
   const hasNodes = state.selectedNodeIds.size > 0 || Boolean(state.selectedNodeId);
   const hasEdges = state.selectedEdgeIds.size > 0 || Boolean(state.selectedEdgeId);
+  const singleNode = state.selectedNodeIds.size === 1 && !hasEdges;
+  const selectedNode = singleNode ? state.project?.nodes.find(node => state.selectedNodeIds.has(node.id)) : null;
   menu.querySelector('[data-context-action="edit-edge"]').hidden = state.selectedEdgeIds.size !== 1;
+  menu.querySelectorAll("[data-node-context]").forEach(item => { item.hidden = !singleNode; });
+  menu.querySelector('[data-context-action="link"]').textContent = selectedNode?.chapter_id ? "更改章节" : "连接章节";
+  menu.querySelector('[data-context-action="color"]').setAttribute("aria-expanded", "false");
+  $("#quickColorPalette").hidden = true;
   menu.querySelector('[data-context-action="delete"]').hidden = !hasNodes && !hasEdges;
   menu.hidden = false;
-  menu.style.left = `${Math.min(viewport.width - 160, Math.max(8, clientX - viewport.left))}px`;
-  menu.style.top = `${Math.min(viewport.height - 130, Math.max(8, clientY - viewport.top))}px`;
+  menu.style.left = `${Math.min(viewport.width - menu.offsetWidth - 8, Math.max(8, clientX - viewport.left))}px`;
+  menu.style.top = `${Math.min(viewport.height - menu.offsetHeight - 8, Math.max(8, clientY - viewport.top))}px`;
 }
 
 function edgePathIntersectsRegion(path, region, viewportBounds) {
@@ -2272,7 +2264,6 @@ function bindCanvasSelection() {
       state.selectedNodeId = ids.length === 1 ? ids[0] : null;
       state.selectedEdgeIds = new Set(edgeIds);
       state.selectedEdgeId = edgeIds.length === 1 ? edgeIds[0] : null;
-      $("#nodeQuickActions").hidden = ids.length !== 1 || edgeIds.length > 0;
       renderMap();
       const selectedCount = ids.length + edgeIds.length;
       if (selectedCount) toast(`已选中 ${ids.length} 个图形、${edgeIds.length} 条连接线，可右键删除`);
@@ -2509,8 +2500,25 @@ function bindEvents() {
   });
   $("#canvasContextMenu").addEventListener("click", async event => {
     const action = event.target.closest("[data-context-action]")?.dataset.contextAction;
-    $("#canvasContextMenu").hidden = true;
+    if (!action) return;
+    const menu = $("#canvasContextMenu");
+    if (action === "color") {
+      const palette = $("#quickColorPalette");
+      palette.hidden = !palette.hidden;
+      event.target.closest("[data-context-action]").setAttribute("aria-expanded", String(!palette.hidden));
+      const viewportRect = $("#mapViewport").getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      if (menuRect.bottom > viewportRect.bottom - 8) menu.style.top = `${Math.max(8, parseFloat(menu.style.top) - (menuRect.bottom - viewportRect.bottom + 8))}px`;
+      return;
+    }
+    menu.hidden = true;
     if (action === "edit-edge" && state.selectedEdgeId) openEdgeDialog(state.selectedEdgeId);
+    if (action === "note") openNoteDialog();
+    if (action === "link") {
+      const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
+      if (node?.chapter_id) openChapterLinkDialog(); else startChapterLinkMode();
+    }
+    if (action === "settings") openInspector(state.selectedNodeId);
     if (action === "delete") await deleteCanvasSelection();
     if (action === "clear") clearCanvasSelection();
   });
@@ -2521,21 +2529,11 @@ function bindEvents() {
     event.currentTarget.classList.toggle("active"); state.connectSourceId = null;
     event.currentTarget.innerHTML = event.currentTarget.classList.contains("active") ? '<span class="arrow-preview">→</span>选起点' : '<span class="arrow-preview">→</span>箭头';
   });
-  $("#nodeQuickActions").addEventListener("click", event => {
-    const action = event.target.closest("[data-node-action]")?.dataset.nodeAction;
-    if (action === "note") openNoteDialog();
-    if (action === "link") {
-      const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
-      if (node?.chapter_id) openChapterLinkDialog(); else startChapterLinkMode();
-    }
-    if (action === "color") $("#quickColorPalette").hidden = !$("#quickColorPalette").hidden;
-    if (action === "settings") openInspector(state.selectedNodeId);
-  });
   $("#quickColorPalette").addEventListener("click", event => {
     const color = event.target.closest("[data-quick-color]")?.dataset.quickColor;
     const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
     if (!color || !node) return;
-    node.color = color; saveNode(node, { color }); $("#quickColorPalette").hidden = true; renderMap();
+    node.color = color; saveNode(node, { color }); $("#quickColorPalette").hidden = true; $("#canvasContextMenu").hidden = true; renderMap();
   });
   $("#noteList").addEventListener("click", event => { const id = event.target.closest("[data-dialog-note-id]")?.dataset.dialogNoteId; if (id) renderNoteDialog(id); });
   $("#newNoteButton").addEventListener("click", () => { state.editingNoteId = null; renderNoteDialog(); $("#noteContent").focus(); });
@@ -2578,7 +2576,7 @@ function bindEvents() {
     if (!event.target.closest("#typographyPanel") && !event.target.closest("#typographyButton")) setTypographyPanel(false);
     if (!event.target.closest("#backgroundPanel") && !event.target.closest("#backgroundButton")) setBackgroundPanel(false);
     const inspector = $("#inspector");
-    if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-node-action="settings"]')) inspector.classList.add("hidden");
+    if (!inspector.classList.contains("hidden") && !event.target.closest("#inspector") && !event.target.closest('[data-context-action="settings"]')) inspector.classList.add("hidden");
   });
   document.addEventListener("keydown", event => {
     const modifier = event.ctrlKey || event.metaKey;
@@ -2748,7 +2746,6 @@ async function clearProjectCanvas() {
     $("#connectButton").classList.remove("active");
     $("#connectButton").innerHTML = '<span class="arrow-preview">→</span>箭头';
     $(".inspector").classList.add("hidden");
-    $("#nodeQuickActions").hidden = true;
     $("#clearCanvasDialog").close();
     renderMap();
     toast(`画布已清空：${result.nodes} 个节点、${result.edges} 条连接线`);
@@ -2773,7 +2770,7 @@ async function deleteCanvasSelection() {
     state.project.notes = state.project.notes.filter(note => !deletedNodes.has(note.node_id));
     state.selectedNodeId = null; state.selectedNodeIds.clear();
     state.selectedEdgeId = null; state.selectedEdgeIds.clear();
-    $(".inspector").classList.add("hidden"); $("#nodeQuickActions").hidden = true;
+    $(".inspector").classList.add("hidden");
     renderMap();
     toast(`已删除 ${nodeIds.length} 个图形、${edgeIds.length} 条连接线`);
   } catch (error) { toast(error.message); }
@@ -2790,7 +2787,7 @@ async function deleteSelectedNode() {
     state.project.edges = state.project.edges.filter(edge => !deletedIds.has(edge.source_id) && !deletedIds.has(edge.target_id));
     state.project.notes = state.project.notes.filter(note => !deletedIds.has(note.node_id));
     state.selectedNodeId = null; state.selectedNodeIds.clear(); state.selectedEdgeId = null; state.selectedEdgeIds.clear();
-    $(".inspector").classList.add("hidden"); $("#nodeQuickActions").hidden = true; renderMap();
+    $(".inspector").classList.add("hidden"); renderMap();
     toast(nodes.length === 1 ? "节点已删除" : `已删除 ${nodes.length} 个图形`);
   } catch (error) { toast(error.message); }
 }
