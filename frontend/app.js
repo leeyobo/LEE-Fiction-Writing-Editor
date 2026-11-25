@@ -2098,10 +2098,13 @@ async function deleteCurrentNote() {
 function openChapterLinkDialog() {
   const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
   if (!node) return;
-  $("#chapterLinkList").innerHTML = state.project.chapters.map(chapter => {
-    const volume = state.project.volumes.find(item => item.id === chapter.volume_id);
-    const title = `${chapter.title}${volume ? `（${volume.title}）` : ""}`;
-    return `<button class="chapter-link-option ${chapter.id === node.chapter_id ? "active" : ""}" type="button" data-link-chapter-id="${chapter.id}"><b>${String(chapterNumberInVolume(chapter)).padStart(2, "0")}</b><span>${escapeHtml(title)}</span></button>`;
+  $("#chapterLinkList").innerHTML = state.project.volumes.map(volume => {
+    const chapters = state.project.chapters.filter(chapter => chapter.volume_id === volume.id);
+    if (!chapters.length) return "";
+    const options = chapters.map(chapter => (
+      `<button class="chapter-link-option ${chapter.id === node.chapter_id ? "active" : ""}" type="button" data-link-chapter-id="${chapter.id}"><b>${String(chapterNumberInVolume(chapter)).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span></button>`
+    )).join("");
+    return `<section class="chapter-link-volume"><div class="chapter-link-volume-heading"><span>${escapeHtml(volume.title)}</span><small>${chapters.length} 章</small></div><div class="chapter-link-volume-options">${options}</div></section>`;
   }).join("");
   $("#unlinkChapterButton").hidden = !node.chapter_id;
   if (!$("#chapterLinkDialog").open) $("#chapterLinkDialog").showModal();
