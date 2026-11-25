@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v40-collapsible-story-maps";
+const CACHE = "motu-shell-v41-volume-chapter-numbering";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

@@ -503,8 +503,8 @@ function renderSplitChapterOptions() {
   if (!state.project.chapters.some(chapter => chapter.id === state.split.chapterId)) {
     state.split.chapterId = defaultSplitChapterId();
   }
-  select.innerHTML = state.project.chapters.map((chapter, index) => (
-    `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`
+  select.innerHTML = state.project.chapters.map(chapter => (
+    `<option value="${chapter.id}">${escapeHtml(chapterOptionLabel(chapter))}</option>`
   )).join("");
   select.value = state.split.chapterId || "";
 }
@@ -514,7 +514,7 @@ function renderSplitPane() {
   renderSplitChapterOptions();
   const chapter = state.project.chapters.find(item => item.id === state.split.chapterId);
   if (!chapter) return;
-  const index = state.project.chapters.indexOf(chapter) + 1;
+  const index = chapterNumberInVolume(chapter);
   const content = chapter.id === state.activeChapterId ? editorToMarkdown() : (chapter.content || "");
   $("#splitChapterIndex").textContent = `CHAPTER ${String(index).padStart(2, "0")}`;
   $("#splitChapterTitle").textContent = chapter.id === state.activeChapterId ? ($("#chapterTitleInput").value.trim() || chapter.title) : chapter.title;
@@ -1350,6 +1350,19 @@ function chapterMatchesFilter(chapter, filter) {
   return chapter.title.toLowerCase().includes(filter);
 }
 
+function chapterNumberInVolume(chapter) {
+  if (!state.project || !chapter) return 0;
+  const volumeChapters = state.project.chapters.filter(item => item.volume_id === chapter.volume_id);
+  const index = volumeChapters.findIndex(item => item.id === chapter.id);
+  return index >= 0 ? index + 1 : state.project.chapters.indexOf(chapter) + 1;
+}
+
+function chapterOptionLabel(chapter) {
+  const number = String(chapterNumberInVolume(chapter)).padStart(2, "0");
+  const volume = state.project?.volumes.find(item => item.id === chapter.volume_id);
+  return `${number} · ${chapter.title}${volume ? `（${volume.title}）` : ""}`;
+}
+
 function sortProjectChapters() {
   if (!state.project) return;
   const volumeOrder = new Map(state.project.volumes.map((volume, index) => [volume.id, index]));
@@ -1378,7 +1391,7 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
     const volumeChapters = chapters.filter(chapter => chapter.volume_id === volume.id);
     const volumeTotal = state.project.chapters.filter(chapter => chapter.volume_id === volume.id).length;
     const chapterRows = volumeChapters.map(chapter => {
-      const index = state.project.chapters.indexOf(chapter) + 1;
+      const index = chapterNumberInVolume(chapter);
       const checked = state.selectedChapterIds.has(chapter.id);
       return `<li class="chapter-group ${checked ? "selected-for-delete" : ""}">
         <div class="chapter-item ${state.chapterBulkMode ? "bulk-select" : ""} ${writeViewActive && chapter.id === state.activeChapterId ? "active" : ""}" data-chapter-id="${chapter.id}">
@@ -1412,7 +1425,7 @@ function renderEditor() {
   const chapter = activeChapter();
   if (!chapter) return;
   ensureEditorHistory(chapter);
-  const chapterIndex = state.project.chapters.indexOf(chapter) + 1;
+  const chapterIndex = chapterNumberInVolume(chapter);
   $("#chapterIndex").textContent = `CHAPTER ${String(chapterIndex).padStart(2, "0")}`;
   $("#chapterSubtitle").textContent = "在安静里，把故事写下来。";
   $("#chapterTitleInput").value = chapter.title;
@@ -1438,7 +1451,7 @@ function renderLinkedNodes() {
 
 function renderChapterOptions() {
   const currentValue = $("#nodeChapter").value;
-  $("#nodeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map((chapter, index) => `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`).join("")}`;
+  $("#nodeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map(chapter => `<option value="${chapter.id}">${escapeHtml(chapterOptionLabel(chapter))}</option>`).join("")}`;
   $("#nodeChapter").value = currentValue;
 }
 
@@ -1630,7 +1643,7 @@ function renderEdges() {
     const color = edge.color || "blue";
     const selected = edge.id === state.selectedEdgeId || state.selectedEdgeIds.has(edge.id) ? " selected" : "";
     const chapter = state.project.chapters.find(item => item.id === edge.chapter_id);
-    const chapterIndex = chapter ? state.project.chapters.indexOf(chapter) + 1 : 0;
+    const chapterIndex = chapter ? chapterNumberInVolume(chapter) : 0;
     const lines = [];
     if (edge.label?.trim()) lines.push(edge.label.trim().split(/\r?\n/)[0].slice(0, 28));
     if (chapter) lines.push(`链接 ${String(chapterIndex).padStart(2, "0")} · ${chapter.title.slice(0, 24)}`);
@@ -2081,7 +2094,11 @@ async function deleteCurrentNote() {
 function openChapterLinkDialog() {
   const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
   if (!node) return;
-  $("#chapterLinkList").innerHTML = state.project.chapters.map((chapter, index) => `<button class="chapter-link-option ${chapter.id === node.chapter_id ? "active" : ""}" type="button" data-link-chapter-id="${chapter.id}"><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(chapter.title)}</span></button>`).join("");
+  $("#chapterLinkList").innerHTML = state.project.chapters.map(chapter => {
+    const volume = state.project.volumes.find(item => item.id === chapter.volume_id);
+    const title = `${chapter.title}${volume ? `（${volume.title}）` : ""}`;
+    return `<button class="chapter-link-option ${chapter.id === node.chapter_id ? "active" : ""}" type="button" data-link-chapter-id="${chapter.id}"><b>${String(chapterNumberInVolume(chapter)).padStart(2, "0")}</b><span>${escapeHtml(title)}</span></button>`;
+  }).join("");
   $("#unlinkChapterButton").hidden = !node.chapter_id;
   if (!$("#chapterLinkDialog").open) $("#chapterLinkDialog").showModal();
 }
@@ -2227,7 +2244,7 @@ function openEdgeDialog(edgeId) {
   $("#edgeNote").value = edge.label || "";
   $("#edgeStyle").value = edge.line_style || "solid";
   $$("#edgeColorPicker [data-edge-color]").forEach(button => button.classList.toggle("active", button.dataset.edgeColor === (edge.color || "blue")));
-  $("#edgeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map((chapter, index) => `<option value="${chapter.id}">${String(index + 1).padStart(2, "0")} · ${escapeHtml(chapter.title)}</option>`).join("")}`;
+  $("#edgeChapter").innerHTML = `<option value="">不链接章节</option>${state.project.chapters.map(chapter => `<option value="${chapter.id}">${escapeHtml(chapterOptionLabel(chapter))}</option>`).join("")}`;
   $("#edgeChapter").value = edge.chapter_id || "";
   $("#openEdgeChapterButton").disabled = !edge.chapter_id;
   renderMap();
