@@ -1351,7 +1351,7 @@ function renderChapters(filter = $("#chapterSearch").value.trim().toLowerCase())
         ${state.chapterBulkMode ? `<input class="chapter-select" type="checkbox" data-chapter-select="${chapter.id}" aria-label="选择${escapeHtml(chapter.title)}" ${checked ? "checked" : ""} />` : ""}
         <span class="chapter-number">${String(index).padStart(2, "0")}</span>
         <span class="chapter-copy"><strong>${escapeHtml(chapter.title)}</strong></span>
-        <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-delete-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
+        <span class="chapter-trailing"><span class="chapter-words">${wordCount(chapter.content)}</span><button class="chapter-action-button" type="button" data-rename-chapter="${chapter.id}" aria-label="修改${escapeHtml(chapter.title)}标题" title="修改章节标题">修改</button><button class="chapter-action-button" type="button" data-delete-chapter="${chapter.id}" aria-label="删除${escapeHtml(chapter.title)}" title="${state.project.chapters.length <= 1 ? "作品至少需要保留一个章节" : "删除章节"}" ${state.project.chapters.length <= 1 ? "disabled" : ""}>删除</button></span>
       </div>
     </li>`;
   }).join("");
@@ -1712,6 +1712,29 @@ async function addChapter() {
     selectChapter(chapter.id);
     $("#chapterTitleInput").select();
     toast("新章节已创建");
+  } catch (error) { toast(error.message); }
+}
+
+async function renameChapter(chapterId) {
+  const chapter = state.project?.chapters.find(item => item.id === chapterId);
+  if (!chapter || !requireProject("修改章节标题")) return;
+  const title = window.prompt("修改章节标题", chapter.title);
+  if (title === null) return;
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) { toast("章节标题不能为空"); return; }
+  if ([...trimmedTitle].length > 120) { toast("章节标题不能超过 120 个字符"); return; }
+  if (trimmedTitle === chapter.title) return;
+  try {
+    const updated = await api(`/api/chapters/${chapter.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: trimmedTitle }),
+    });
+    Object.assign(chapter, updated);
+    if (chapter.id === state.activeChapterId) $("#chapterTitleInput").value = chapter.title;
+    renderChapters();
+    renderChapterOptions();
+    renderSplitPane();
+    toast("章节标题已更新");
   } catch (error) { toast(error.message); }
 }
 
@@ -2483,6 +2506,8 @@ function bindEvents() {
   });
   $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
   $("#chapterList").addEventListener("click", event => {
+    const renameButton = event.target.closest("[data-rename-chapter]");
+    if (renameButton) { renameChapter(renameButton.dataset.renameChapter); return; }
     const deleteButton = event.target.closest("[data-delete-chapter]");
     if (deleteButton) { openChapterDeleteDialog([deleteButton.dataset.deleteChapter]); return; }
     const selectInput = event.target.closest("[data-chapter-select]");
