@@ -323,6 +323,14 @@
       </form>
     </dialog>
 
+    <dialog id="renameChapterDialog" class="modal map-name-modal">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">MANUSCRIPT</p><h2>修改章节标题</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>
+        <label>章节标题<input id="renameChapterInput" maxlength="120" placeholder="输入章节标题" autocomplete="off" /></label>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button id="saveChapterRenameButton" class="wide-button" type="button">保存标题</button></div>
+      </form>
+    </dialog>
+
     <dialog id="storyMapDeleteDialog" class="modal confirm-modal">
       <form method="dialog">
         <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DELETE STORY MAP</p><h2>确认删除故事地图？</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>

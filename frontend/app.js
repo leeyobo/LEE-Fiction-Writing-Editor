@@ -11,6 +11,7 @@ const state = {
   project: null,
   activeMapId: null,
   editingMapId: null,
+  editingChapterId: null,
   pendingMapDeleteId: null,
   mapViewStates: new Map(),
   activeChapterId: localStorage.getItem("motu.activeChapterId") || null,
@@ -1715,27 +1716,45 @@ async function addChapter() {
   } catch (error) { toast(error.message); }
 }
 
-async function renameChapter(chapterId) {
+function openChapterRenameDialog(chapterId) {
   const chapter = state.project?.chapters.find(item => item.id === chapterId);
   if (!chapter || !requireProject("修改章节标题")) return;
-  const title = window.prompt("修改章节标题", chapter.title);
-  if (title === null) return;
-  const trimmedTitle = title.trim();
-  if (!trimmedTitle) { toast("章节标题不能为空"); return; }
-  if ([...trimmedTitle].length > 120) { toast("章节标题不能超过 120 个字符"); return; }
-  if (trimmedTitle === chapter.title) return;
+  state.editingChapterId = chapter.id;
+  $("#renameChapterInput").value = chapter.title;
+  $("#renameChapterDialog").showModal();
+  requestAnimationFrame(() => {
+    $("#renameChapterInput").focus();
+    $("#renameChapterInput").select();
+  });
+}
+
+async function saveChapterRename() {
+  const chapter = state.project?.chapters.find(item => item.id === state.editingChapterId);
+  if (!chapter) return;
+  const trimmedTitle = $("#renameChapterInput").value.trim();
+  if (!trimmedTitle) { toast("章节标题不能为空"); $("#renameChapterInput").focus(); return; }
+  if ([...trimmedTitle].length > 120) { toast("章节标题不能超过 120 个字符"); $("#renameChapterInput").focus(); return; }
+  if (trimmedTitle === chapter.title) { $("#renameChapterDialog").close(); return; }
+  const button = $("#saveChapterRenameButton");
+  button.disabled = true;
   try {
     const updated = await api(`/api/chapters/${chapter.id}`, {
       method: "PATCH",
       body: JSON.stringify({ title: trimmedTitle }),
     });
     Object.assign(chapter, updated);
-    if (chapter.id === state.activeChapterId) $("#chapterTitleInput").value = chapter.title;
+    if (chapter.id === state.activeChapterId) {
+      clearTimeout(state.chapterTimer);
+      $("#chapterTitleInput").value = chapter.title;
+    }
     renderChapters();
     renderChapterOptions();
     renderSplitPane();
+    renderMap();
+    $("#renameChapterDialog").close();
     toast("章节标题已更新");
   } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
 }
 
 function rememberActiveMapView() {
@@ -2507,7 +2526,7 @@ function bindEvents() {
   $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
   $("#chapterList").addEventListener("click", event => {
     const renameButton = event.target.closest("[data-rename-chapter]");
-    if (renameButton) { renameChapter(renameButton.dataset.renameChapter); return; }
+    if (renameButton) { openChapterRenameDialog(renameButton.dataset.renameChapter); return; }
     const deleteButton = event.target.closest("[data-delete-chapter]");
     if (deleteButton) { openChapterDeleteDialog([deleteButton.dataset.deleteChapter]); return; }
     const selectInput = event.target.closest("[data-chapter-select]");
@@ -2534,6 +2553,10 @@ function bindEvents() {
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
   $("#addChapterButton").addEventListener("click", addChapter);
+  $("#saveChapterRenameButton").addEventListener("click", saveChapterRename);
+  $("#renameChapterInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); saveChapterRename(); }
+  });
   $("#chapterBatchButton").addEventListener("click", toggleChapterBulkMode);
   $("#selectAllChapters").addEventListener("change", event => {
     const filter = $("#chapterSearch").value.trim().toLowerCase();
