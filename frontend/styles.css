@@ -414,6 +414,9 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .minimap-actions button:hover { border-color: #8db3e8; background: #eaf2ff; }
 .minimap-actions button.active { color: white; border-color: #2563eb; background: #2563eb; }
 .story-node { --node-color:#2563eb; position: absolute; width: 168px; min-height: 82px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--node-color) 60%, white); border-radius: 16px; background: color-mix(in srgb, var(--node-color) 9%, white); box-shadow: 0 8px 26px rgba(37,99,235,.10); cursor: grab; user-select: none; touch-action: none; pointer-events: auto; transition: filter .14s ease; }
+.node-drag-preview { position: fixed; z-index: 120; opacity: .62; pointer-events: none; cursor: grabbing; transition: none; box-shadow: 0 12px 30px rgba(37,99,235,.22); }
+.node-drag-preview.drop-target-active { opacity: .88; filter: drop-shadow(0 0 9px rgba(37,99,235,.4)); }
+.node-drag-preview .node-type { color: #2563eb; }
 .story-node[data-color="violet"] { --node-color:#7c3aed; }.story-node[data-color="green"] { --node-color:#0f9f78; }.story-node[data-color="amber"] { --node-color:#e59a28; }.story-node[data-color="rose"] { --node-color:#dc5670; }.story-node[data-color="slate"] { --node-color:#64748b; }
 .story-node.selected { outline: 3px solid color-mix(in srgb, var(--node-color) 28%, transparent); border-color: var(--node-color); }
 .story-node.focus-pulse { animation: node-focus 1.1s ease-out; }

@@ -2919,11 +2919,52 @@ function bindEvents() {
       const pointerId = event.pointerId;
       const start = { x: event.clientX, y: event.clientY };
       let moved = false;
+      let dragPreview = null;
+      const previewLabels = {
+        rectangle: "新流程", rounded: "新节点", diamond: "新判断", circle: "新节点",
+        ellipse: "开始 / 结束", parallelogram: "输入 / 输出", hexagon: "新准备",
+        document: "新文档", cylinder: "新数据",
+      };
+      const updateDragPreview = pointerEvent => {
+        if (!dragPreview) {
+          dragPreview = document.createElement("div");
+          dragPreview.className = `story-node shape-${button.dataset.shape} node-drag-preview`;
+          dragPreview.dataset.color = "blue";
+          const inner = document.createElement("div");
+          inner.className = "node-inner";
+          const typeLabel = document.createElement("span");
+          typeLabel.className = "node-type";
+          typeLabel.textContent = "情节";
+          const title = document.createElement("span");
+          title.className = "node-label";
+          title.textContent = previewLabels[button.dataset.shape] || "新节点";
+          inner.append(typeLabel, title);
+          dragPreview.append(inner);
+          document.body.append(dragPreview);
+        }
+        const viewportBounds = $("#mapViewport").getBoundingClientRect();
+        const previewWidth = dragPreview.offsetWidth;
+        const previewHeight = dragPreview.offsetHeight;
+        dragPreview.style.left = `${pointerEvent.clientX - previewWidth / 2}px`;
+        dragPreview.style.top = `${pointerEvent.clientY - previewHeight / 2}px`;
+        dragPreview.classList.toggle(
+          "drop-target-active",
+          pointerEvent.clientX >= viewportBounds.left && pointerEvent.clientX <= viewportBounds.right
+            && pointerEvent.clientY >= viewportBounds.top && pointerEvent.clientY <= viewportBounds.bottom,
+        );
+      };
+      const removeDragPreview = () => {
+        dragPreview?.remove();
+        dragPreview = null;
+      };
       button.setPointerCapture(pointerId);
       button.classList.add("dragging");
       const move = moveEvent => {
         if (moveEvent.pointerId !== pointerId) return;
-        if (Math.hypot(moveEvent.clientX - start.x, moveEvent.clientY - start.y) > 6) moved = true;
+        if (Math.hypot(moveEvent.clientX - start.x, moveEvent.clientY - start.y) > 6) {
+          moved = true;
+          updateDragPreview(moveEvent);
+        }
       };
       const finish = upEvent => {
         if (upEvent.pointerId !== pointerId) return;
@@ -2931,6 +2972,7 @@ function bindEvents() {
         button.removeEventListener("pointerup", finish);
         button.removeEventListener("pointercancel", cancel);
         button.classList.remove("dragging");
+        removeDragPreview();
         if (!moved) {
           addNode(button.dataset.type, button.dataset.shape);
           return;
@@ -2949,6 +2991,7 @@ function bindEvents() {
         button.removeEventListener("pointerup", finish);
         button.removeEventListener("pointercancel", cancel);
         button.classList.remove("dragging");
+        removeDragPreview();
       };
       button.addEventListener("pointermove", move);
       button.addEventListener("pointerup", finish);
