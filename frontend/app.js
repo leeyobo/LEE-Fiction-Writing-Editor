@@ -2532,9 +2532,9 @@ function setCanvasControlScheme(scheme, announce = false) {
   button.classList.toggle("active", classic);
   button.setAttribute("aria-checked", String(classic));
   button.title = classic ? "关闭后恢复空白处直接拖动画布" : "开启后恢复原来的空白拖动框选方式";
-  $("#mapHelpText").textContent = classic
+  $("#mapHelpText").innerHTML = classic
     ? "经典操作 · 空白处拖动框选 · 开启抓手或按住空格/中键拖动画布 · 图形可直接操作"
-    : "空白处拖动画布 · 图形可直接操作 · Shift+拖动框选 · 空格/中键临时抓手 · 滚轮平移";
+    : "空白处拖动画布 · 图形可直接操作 · <kbd>Shift + 鼠标左键</kbd> <strong>可选择区域</strong>";
   localStorage.setItem("motu.canvasControlScheme", state.canvasControlScheme);
   if (announce) toast(classic ? "已切换为经典操作方式" : "已切换为导航与编辑并存方式");
 }
