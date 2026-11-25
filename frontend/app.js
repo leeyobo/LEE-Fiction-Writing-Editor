@@ -2117,14 +2117,20 @@ function startChapterLinkMode() {
   toast("请从左侧作品目录选择要链接的章节");
 }
 
+function cancelChapterLinkMode(showToast = true) {
+  if (!state.linkTargetNodeId) return;
+  state.linkTargetNodeId = null;
+  $(".chapter-panel").classList.remove("link-target-mode");
+  if (showToast) toast("已取消选择章节");
+}
+
 async function setNodeChapterLink(chapterId) {
   const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
   if (!node) return;
   try {
     const updated = await api(`/api/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify({ chapter_id: chapterId }) });
     Object.assign(node, updated);
-    state.linkTargetNodeId = null;
-    $(".chapter-panel").classList.remove("link-target-mode");
+    cancelChapterLinkMode(false);
     renderMap();
     if ($("#chapterLinkDialog").open) $("#chapterLinkDialog").close();
     toast(chapterId ? "章节链接已建立；点击图形即可进入章节" : "章节链接已断开");
@@ -2673,6 +2679,7 @@ function bindEvents() {
     if (event.key === "Enter") { event.preventDefault(); saveStoryMap(); }
   });
   $("#confirmStoryMapDeleteButton").addEventListener("click", deletePendingStoryMap);
+  $("#cancelChapterLinkButton").addEventListener("click", () => cancelChapterLinkMode());
   $("#chapterList").addEventListener("click", event => {
     const selectAllVolumeButton = event.target.closest("[data-select-all-volume]");
     if (selectAllVolumeButton) {
