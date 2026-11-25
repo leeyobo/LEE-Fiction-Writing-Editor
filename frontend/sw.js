@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v47-unlink-chapter-context-action";
+const CACHE = "motu-shell-v48-disable-maps-while-linking";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

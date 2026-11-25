@@ -2114,13 +2114,21 @@ function startChapterLinkMode() {
   renderChapters();
   state.linkTargetNodeId = state.selectedNodeId;
   $(".chapter-panel").classList.add("link-target-mode");
+  setStoryMapPickerDisabled(true);
   toast("请从左侧作品目录选择要链接的章节");
+}
+
+function setStoryMapPickerDisabled(disabled) {
+  const storyMapSection = $(".story-map-list-section");
+  storyMapSection.inert = disabled;
+  storyMapSection.setAttribute("aria-disabled", String(disabled));
 }
 
 function cancelChapterLinkMode(showToast = true) {
   if (!state.linkTargetNodeId) return;
   state.linkTargetNodeId = null;
   $(".chapter-panel").classList.remove("link-target-mode");
+  setStoryMapPickerDisabled(false);
   if (showToast) toast("已取消选择章节");
 }
 
