@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v41-volume-chapter-numbering";
+const CACHE = "motu-shell-v42-chapter-title-sequence";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

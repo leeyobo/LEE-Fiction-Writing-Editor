@@ -1765,7 +1765,12 @@ async function addChapterToVolume(volumeId) {
   const volume = state.project.volumes.find(item => item.id === volumeId);
   if (!volume) return;
   try {
-    const chapterNumber = state.project.chapters.filter(chapter => chapter.volume_id === volumeId).length + 1;
+    const volumeChapters = state.project.chapters.filter(chapter => chapter.volume_id === volumeId);
+    const existingNumbers = volumeChapters
+      .map(chapter => chapter.title.match(/^第\s*(\d+)\s*章(?:\s|$)/)?.[1])
+      .filter(Boolean)
+      .map(Number);
+    const chapterNumber = Math.max(volumeChapters.length, ...existingNumbers, 0) + 1;
     const chapter = await api(`/api/projects/${state.project.id}/chapters`, {
       method: "POST",
       body: JSON.stringify({ title: `第 ${chapterNumber} 章`, volume_id: volumeId }),
