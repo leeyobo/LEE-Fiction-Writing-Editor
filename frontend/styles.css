@@ -82,6 +82,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .story-map-item:hover .story-map-actions, .story-map-item:focus-within .story-map-actions { opacity: 1; pointer-events: auto; }
 .story-map-actions button { flex: 0 0 auto; padding: 5px 6px; border: 1px solid #efb8c0; border-radius: 7px; color: #bd3548; background: #fff8f9; cursor: pointer; font-size: 11px; line-height: 1.2; white-space: nowrap; }
 .story-map-actions button:hover { color: #9f2638; border-color: #e9aab4; background: #fff0f2; }
+.story-map-actions [data-rename-map] { color: #667085; border-color: #d7dce5; background: #f5f6f8; }
+.story-map-actions [data-rename-map]:hover { color: #475467; border-color: #c4cad4; background: #eceef2; }
 .story-map-actions button:disabled { opacity: .42; cursor: not-allowed; }
 .volume-label { display: flex; justify-content: space-between; padding: 0 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .chapter-list { min-height: 0; flex: 1; list-style: none; padding: 0; margin: 0; overflow: auto; }
@@ -101,6 +103,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .chapter-words { position: absolute; right: 0; }
 .chapter-action-button { position: relative; z-index: 1; flex: 0 0 auto; padding: 5px 6px; border: 1px solid #efb8c0; border-radius: 7px; color: #bd3548; background: #fff8f9; opacity: 0; pointer-events: none; cursor: pointer; font-size: 11px; line-height: 1.2; white-space: nowrap; transition: opacity .14s ease; }
 .chapter-action-button:hover { color: #9f2638; border-color: #e9aab4; background: #fff0f2; }
+.chapter-action-button[data-rename-chapter] { color: #667085; border-color: #d7dce5; background: #f5f6f8; }
+.chapter-action-button[data-rename-chapter]:hover { color: #475467; border-color: #c4cad4; background: #eceef2; }
 .chapter-item:not(.bulk-select):hover .chapter-words, .chapter-item:not(.bulk-select):focus-within .chapter-words { opacity: 0; }
 .chapter-item:not(.bulk-select):hover .chapter-action-button, .chapter-item:not(.bulk-select):focus-within .chapter-action-button { opacity: 1; pointer-events: auto; }
 .chapter-action-button:disabled { opacity: .42 !important; cursor: not-allowed; }
@@ -548,11 +552,15 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .story-map-list-heading button, .night-mode .story-map-icon { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
 .night-mode .story-map-actions button { color: #f0a2ad; border-color: #754554; background: #33232c; }
 .night-mode .story-map-actions button:hover { color: #ffd6dc; border-color: #a95c6b; background: #422b36; }
+.night-mode .story-map-actions [data-rename-map] { color: #d0d5dd; border-color: #4b5565; background: #283140; }
+.night-mode .story-map-actions [data-rename-map]:hover { color: #f2f4f7; border-color: #667085; background: #343e4e; }
 .night-mode .story-map-item:hover { background: #202d42; }
 .night-mode .story-map-item.active { color: #e8f1ff; background: #2a3c59; box-shadow: inset 3px 0 0 #60a5fa; }
 .night-mode .story-map-item.active .story-map-icon { color: #0f172a; background: #7db8ff; }
 .night-mode .chapter-item.active .chapter-copy strong { color: #f8fafc; }
 .night-mode .chapter-item.active .chapter-words { color: #bdcbe0; }
+.night-mode .chapter-action-button[data-rename-chapter] { color: #d0d5dd; border-color: #4b5565; background: #283140; }
+.night-mode .chapter-action-button[data-rename-chapter]:hover { color: #f2f4f7; border-color: #667085; background: #343e4e; }
 .night-mode .chapter-number { color: #b4c0d1; background: #263348; }
 .night-mode .chapter-item.active .chapter-number { color: #0f172a; background: #93c5fd; }
 .night-mode .night-mode-button { color: #cbd5e1; border-color: #415069; background: #1b2738; }
