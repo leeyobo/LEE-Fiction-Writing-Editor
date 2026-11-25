@@ -482,6 +482,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .canvas-context-menu button { width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; text-align: left; font-size: 12px; }
 .canvas-context-menu button:hover { background: #eaf3ff; }
 .canvas-context-menu [data-context-action="delete"] { color: #c64e5b; }
+.canvas-context-menu [data-context-action="unlink-chapter"] { color: #c64e5b; }
+.canvas-context-menu [data-context-action="unlink-chapter"]:hover { background: #fff0f2; }
 .context-menu-separator { display: block; height: 1px; margin: 5px 4px; background: var(--line); }
 .context-color-palette { display: grid; grid-template-columns: repeat(6,1fr); gap: 5px; padding: 7px 5px; }
 .context-color-palette[hidden] { display: none; }
@@ -650,6 +652,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .canvas-context-menu button { color: #dce4ef; }
 .night-mode .canvas-context-menu button:hover { background: #27364d; }
 .night-mode .canvas-context-menu [data-context-action="delete"] { color: #fb7185; }
+.night-mode .canvas-context-menu [data-context-action="unlink-chapter"] { color: #fb7185; }
+.night-mode .canvas-context-menu [data-context-action="unlink-chapter"]:hover { background: #422b36; }
 .night-mode .background-panel-heading button, .night-mode .inspector-heading button, .night-mode .modal-heading > button { color: #dbeafe; background: #26364e; }
 .night-mode .find-panel-heading, .night-mode .find-panel-footnote { border-color: #344258; }
 .night-mode .find-window-actions button { color: #dbeafe; background: #26364e; }

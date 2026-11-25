@@ -2438,6 +2438,7 @@ function showCanvasContextMenu(clientX, clientY) {
   menu.querySelector('[data-context-action="edit-edge"]').hidden = state.selectedEdgeIds.size !== 1;
   menu.querySelectorAll("[data-node-context]").forEach(item => { item.hidden = !singleNode; });
   menu.querySelector('[data-context-action="link"]').textContent = selectedNode?.chapter_id ? "更改章节" : "连接章节";
+  menu.querySelector('[data-context-action="unlink-chapter"]').hidden = !selectedNode?.chapter_id;
   menu.querySelector('[data-context-action="color"]').setAttribute("aria-expanded", "false");
   $("#quickColorPalette").hidden = true;
   menu.querySelector('[data-context-action="delete"]').hidden = !hasNodes && !hasEdges;
@@ -2994,6 +2995,7 @@ function bindEvents() {
       const node = state.project?.nodes.find(item => item.id === state.selectedNodeId);
       if (node?.chapter_id) openChapterLinkDialog(); else startChapterLinkMode();
     }
+    if (action === "unlink-chapter") await setNodeChapterLink(null);
     if (action === "settings") openInspector(state.selectedNodeId);
     if (action === "delete") await deleteCanvasSelection();
     if (action === "clear") clearCanvasSelection();
