@@ -3163,7 +3163,13 @@ async function deletePendingChapters() {
     const deleted = new Set(ids);
     ids.forEach(id => state.editorHistories.delete(id));
     state.project.chapters = state.project.chapters.filter(chapter => !deleted.has(chapter.id));
-    state.project.chapters.forEach((chapter, position) => { chapter.position = position; });
+    const nextPositionByVolume = new Map();
+    state.project.chapters.forEach(chapter => {
+      const position = nextPositionByVolume.get(chapter.volume_id) || 0;
+      chapter.position = position;
+      nextPositionByVolume.set(chapter.volume_id, position + 1);
+    });
+    sortProjectChapters();
     state.project.nodes.forEach(node => { if (deleted.has(node.chapter_id)) node.chapter_id = null; });
     state.project.edges.forEach(edge => { if (deleted.has(edge.chapter_id)) edge.chapter_id = null; });
     if (deleted.has(state.activeChapterId)) {
