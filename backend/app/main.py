@@ -454,10 +454,81 @@ class StoryMapPackage(BaseModel):
     edges: List[StoryMapPackageEdge] = Field(default_factory=list, max_length=10000)
 
 
+class ProjectPackageVolume(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120)
+    position: int = Field(ge=0)
+
+
+class ProjectPackageChapter(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    volume_key: Optional[str] = None
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(default="", max_length=50_000_000)
+    position: int = Field(ge=0)
+
+
+class ProjectPackageMap(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120)
+    position: int = Field(ge=0)
+
+
+class ProjectPackageNode(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    map_key: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=5000)
+    node_type: NodeType = "plot"
+    shape: NodeShape = "rounded"
+    color: str = Field(default="blue", pattern="^(blue|violet|amber|green|rose|slate)$")
+    x: float = Field(default=0, allow_inf_nan=False)
+    y: float = Field(default=0, allow_inf_nan=False)
+    chapter_key: Optional[str] = None
+
+
+class ProjectPackageEdge(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    map_key: str = Field(min_length=1, max_length=120)
+    source_key: str = Field(min_length=1, max_length=120)
+    target_key: str = Field(min_length=1, max_length=120)
+    label: str = Field(default="", max_length=5000)
+    chapter_key: Optional[str] = None
+    line_style: Literal["solid", "dashed", "dotted"] = "solid"
+    color: str = Field(default="blue", pattern="^(blue|violet|amber|green|rose|slate)$")
+    source_port: Literal[
+        "top", "right", "bottom", "left", "top_left", "top_right", "bottom_right", "bottom_left"
+    ] = "right"
+    target_port: Literal[
+        "top", "right", "bottom", "left", "top_left", "top_right", "bottom_right", "bottom_left"
+    ] = "left"
+
+
+class ProjectPackageNote(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    node_key: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=5000)
+    locked: bool = False
+    position: int = Field(ge=0)
+
+
+class ProjectPackage(BaseModel):
+    format: Literal["lee-project"] = "lee-project"
+    version: int = Field(default=1, ge=1, le=1)
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=1000)
+    volumes: List[ProjectPackageVolume] = Field(min_length=1, max_length=500)
+    chapters: List[ProjectPackageChapter] = Field(default_factory=list, max_length=10000)
+    maps: List[ProjectPackageMap] = Field(min_length=1, max_length=100)
+    nodes: List[ProjectPackageNode] = Field(default_factory=list, max_length=50000)
+    edges: List[ProjectPackageEdge] = Field(default_factory=list, max_length=100000)
+    notes: List[ProjectPackageNote] = Field(default_factory=list, max_length=100000)
+
+
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.15.0",
+    version="0.16.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -475,7 +546,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.15.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.16.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -549,6 +620,178 @@ def get_project(project_id: str):
         "edges": [dict(row) for row in edges],
         "notes": [{**dict(row), "locked": bool(row["locked"])} for row in notes],
     }
+
+
+@app.get("/api/projects/{project_id}/package", dependencies=[Depends(authorize)])
+def export_project_package(project_id: str):
+    with db() as connection:
+        project = connection.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        volumes = connection.execute(
+            "SELECT id, title, position FROM volumes WHERE project_id = ? ORDER BY position, created_at",
+            (project_id,),
+        ).fetchall()
+        chapters = connection.execute(
+            "SELECT id, volume_id, title, content, position FROM chapters WHERE project_id = ? ORDER BY position, created_at",
+            (project_id,),
+        ).fetchall()
+        maps = connection.execute(
+            "SELECT id, title, position FROM story_maps WHERE project_id = ? ORDER BY position, created_at",
+            (project_id,),
+        ).fetchall()
+        nodes = connection.execute(
+            "SELECT * FROM nodes WHERE project_id = ? ORDER BY created_at, id", (project_id,)
+        ).fetchall()
+        edges = connection.execute(
+            "SELECT * FROM edges WHERE project_id = ? ORDER BY created_at, id", (project_id,)
+        ).fetchall()
+        notes = connection.execute(
+            "SELECT * FROM node_notes WHERE project_id = ? ORDER BY node_id, position, created_at", (project_id,)
+        ).fetchall()
+    package = {
+        "format": "lee-project",
+        "version": 1,
+        "title": project["title"],
+        "description": project["description"],
+        "volumes": [{"key": row["id"], "title": row["title"], "position": row["position"]} for row in volumes],
+        "chapters": [{
+            "key": row["id"], "volume_key": row["volume_id"], "title": row["title"],
+            "content": row["content"], "position": row["position"],
+        } for row in chapters],
+        "maps": [{"key": row["id"], "title": row["title"], "position": row["position"]} for row in maps],
+        "nodes": [{
+            "key": row["id"], "map_key": row["map_id"], "label": row["label"], "note": row["note"],
+            "node_type": row["node_type"], "shape": row["shape"], "color": row["color"],
+            "x": row["x"], "y": row["y"], "chapter_key": row["chapter_id"],
+        } for row in nodes],
+        "edges": [{
+            "key": row["id"], "map_key": row["map_id"], "source_key": row["source_id"],
+            "target_key": row["target_id"], "label": row["label"], "chapter_key": row["chapter_id"],
+            "line_style": row["line_style"], "color": row["color"],
+            "source_port": row["source_port"], "target_port": row["target_port"],
+        } for row in edges],
+        "notes": [{
+            "key": row["id"], "node_key": row["node_id"], "content": row["content"],
+            "locked": bool(row["locked"]), "position": row["position"],
+        } for row in notes],
+    }
+    package_bytes = json.dumps(package, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(package_bytes) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="完整项目包不能超过 100 MB")
+    return Response(content=package_bytes, media_type="application/json")
+
+
+@app.post("/api/projects/import", status_code=201, dependencies=[Depends(authorize)])
+def import_project_package(payload: ProjectPackage):
+    total_text_size = sum(len(chapter.content) for chapter in payload.chapters)
+    total_text_size += sum(len(note.content) for note in payload.notes)
+    if total_text_size > 100_000_000:
+        raise HTTPException(status_code=413, detail="完整项目包正文和便签总量不能超过 100 MB")
+
+    def unique_keys(items, label):
+        keys = [item.key for item in items]
+        if len(set(keys)) != len(keys):
+            raise HTTPException(status_code=400, detail=f"项目包中包含重复的{label}标识")
+        return set(keys)
+
+    volume_keys = unique_keys(payload.volumes, "故事卷")
+    chapter_keys = unique_keys(payload.chapters, "章节")
+    map_keys = unique_keys(payload.maps, "故事地图")
+    node_keys = unique_keys(payload.nodes, "节点")
+    unique_keys(payload.edges, "连线")
+    unique_keys(payload.notes, "便签")
+
+    for chapter in payload.chapters:
+        if chapter.volume_key is not None and chapter.volume_key not in volume_keys:
+            raise HTTPException(status_code=400, detail="项目包章节引用了不存在的故事卷")
+    nodes_by_key = {node.key: node for node in payload.nodes}
+    for node in payload.nodes:
+        if node.map_key not in map_keys:
+            raise HTTPException(status_code=400, detail="项目包节点引用了不存在的故事地图")
+        if node.chapter_key is not None and node.chapter_key not in chapter_keys:
+            raise HTTPException(status_code=400, detail="项目包节点引用了不存在的章节")
+    edge_pairs = set()
+    for edge in payload.edges:
+        if edge.map_key not in map_keys:
+            raise HTTPException(status_code=400, detail="项目包连线引用了不存在的故事地图")
+        if edge.source_key not in node_keys or edge.target_key not in node_keys:
+            raise HTTPException(status_code=400, detail="项目包连线引用了不存在的节点")
+        source = nodes_by_key[edge.source_key]
+        target = nodes_by_key[edge.target_key]
+        if source.map_key != edge.map_key or target.map_key != edge.map_key:
+            raise HTTPException(status_code=400, detail="项目包连线不能跨故事地图连接节点")
+        if edge.source_key == edge.target_key:
+            raise HTTPException(status_code=400, detail="项目包中不能包含连接自身的连线")
+        pair = (edge.source_key, edge.target_key)
+        if pair in edge_pairs:
+            raise HTTPException(status_code=400, detail="项目包中包含重复连线")
+        edge_pairs.add(pair)
+        if edge.chapter_key is not None and edge.chapter_key not in chapter_keys:
+            raise HTTPException(status_code=400, detail="项目包连线引用了不存在的章节")
+    for note in payload.notes:
+        if note.node_key not in node_keys:
+            raise HTTPException(status_code=400, detail="项目包便签引用了不存在的节点")
+
+    project_id = new_id("project")
+    volume_ids = {item.key: new_id("volume") for item in payload.volumes}
+    chapter_ids = {item.key: new_id("chapter") for item in payload.chapters}
+    map_ids = {item.key: new_id("map") for item in payload.maps}
+    node_ids = {item.key: new_id("node") for item in payload.nodes}
+    edge_ids = {item.key: new_id("edge") for item in payload.edges}
+    note_ids = {item.key: new_id("note") for item in payload.notes}
+    timestamp = now()
+
+    with db() as connection:
+        connection.execute(
+            "INSERT INTO projects(id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (project_id, payload.title, payload.description, timestamp, timestamp),
+        )
+        for volume in payload.volumes:
+            connection.execute(
+                "INSERT INTO volumes(id, project_id, title, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (volume_ids[volume.key], project_id, volume.title, volume.position, timestamp, timestamp),
+            )
+        for story_map in payload.maps:
+            connection.execute(
+                "INSERT INTO story_maps(id, project_id, title, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (map_ids[story_map.key], project_id, story_map.title, story_map.position, timestamp, timestamp),
+            )
+        for chapter in payload.chapters:
+            connection.execute(
+                """INSERT INTO chapters(id, project_id, volume_id, title, content, position, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (chapter_ids[chapter.key], project_id,
+                 volume_ids.get(chapter.volume_key) if chapter.volume_key else None,
+                 chapter.title, chapter.content, chapter.position, timestamp, timestamp),
+            )
+        for node in payload.nodes:
+            connection.execute(
+                """INSERT INTO nodes(id, project_id, map_id, label, note, node_type, shape, color, x, y,
+                   chapter_id, scene_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
+                (node_ids[node.key], project_id, map_ids[node.map_key], node.label, node.note, node.node_type,
+                 node.shape, node.color, node.x, node.y,
+                 chapter_ids.get(node.chapter_key) if node.chapter_key else None, timestamp, timestamp),
+            )
+        for edge in payload.edges:
+            connection.execute(
+                """INSERT INTO edges(id, project_id, map_id, source_id, target_id, label, chapter_id,
+                   line_style, color, source_port, target_port, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (edge_ids[edge.key], project_id, map_ids[edge.map_key], node_ids[edge.source_key],
+                 node_ids[edge.target_key], edge.label,
+                 chapter_ids.get(edge.chapter_key) if edge.chapter_key else None,
+                 edge.line_style, edge.color, edge.source_port, edge.target_port, timestamp),
+            )
+        for note in payload.notes:
+            connection.execute(
+                """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (note_ids[note.key], project_id, node_ids[note.node_key], note.content,
+                 int(note.locked), note.position, timestamp, timestamp),
+            )
+
+    return get_project(project_id)
 
 
 @app.post("/api/projects/{project_id}/maps", status_code=201, dependencies=[Depends(authorize)])

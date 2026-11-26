@@ -89,7 +89,6 @@ class ApiFlowTest(unittest.TestCase):
         self.assertEqual(final["edges"][0]["line_style"], "dotted")
         self.assertEqual(final["edges"][0]["color"], "rose")
         self.assertTrue(all(note["locked"] for note in final["notes"]))
-
         cleared = self.client.delete(f"/api/projects/{project['id']}/canvas")
         self.assertEqual(cleared.json(), {"nodes": 2, "edges": 1, "notes": 2})
         after_clear = self.client.get(f"/api/projects/{project['id']}").json()
@@ -97,6 +96,113 @@ class ApiFlowTest(unittest.TestCase):
         self.assertEqual(after_clear["edges"], [])
         self.assertEqual(after_clear["notes"], [])
         self.assertEqual(after_clear["chapters"][0]["content"], "The story begins in the rain.")
+
+    def test_complete_project_package_export_and_import_as_new_project(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "完整项目包", "description": "项目包说明"}
+        ).json()
+        second_volume = self.client.post(
+            f"/api/projects/{project['id']}/volumes", json={"title": "第二卷"}
+        ).json()
+        chapter = self.client.patch(
+            f"/api/chapters/{project['chapters'][0]['id']}",
+            json={"title": "雨夜", "content": "第一章正文\n\n保留 Markdown **格式**。"},
+        ).json()
+        second_chapter = self.client.post(
+            f"/api/projects/{project['id']}/chapters",
+            json={"title": "第二章", "volume_id": second_volume["id"]},
+        ).json()
+        second_chapter = self.client.patch(
+            f"/api/chapters/{second_chapter['id']}", json={"content": "第二卷章节正文"}
+        ).json()
+        story_map = project["maps"][0]
+        extra_map = self.client.post(
+            f"/api/projects/{project['id']}/maps", json={"title": "人物关系"}
+        ).json()
+        source = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={
+                "label": "主角登场", "note": "节点说明", "node_type": "character", "shape": "diamond",
+                "color": "violet", "x": 125, "y": 245, "chapter_id": chapter["id"], "map_id": story_map["id"],
+            },
+        ).json()
+        target = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={
+                "label": "关键人物", "node_type": "character", "shape": "hexagon", "color": "green",
+                "x": 420, "y": 260, "chapter_id": second_chapter["id"], "map_id": story_map["id"],
+            },
+        ).json()
+        self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "另一地图节点", "map_id": extra_map["id"]},
+        )
+        self.client.post(
+            f"/api/nodes/{source['id']}/notes", json={"content": "不可忽视的线索", "locked": True}
+        )
+        edge = self.client.post(
+            f"/api/projects/{project['id']}/edges",
+            json={
+                "source_id": source["id"], "target_id": target["id"], "label": "相遇",
+                "chapter_id": chapter["id"], "line_style": "dashed", "color": "rose",
+                "source_port": "bottom", "target_port": "top_left",
+            },
+        ).json()
+
+        exported = self.client.get(f"/api/projects/{project['id']}/package")
+        self.assertEqual(exported.status_code, 200)
+        package = exported.json()
+        self.assertEqual(package["format"], "lee-project")
+        self.assertEqual(package["version"], 1)
+        self.assertEqual(package["title"], "完整项目包")
+        self.assertEqual(len(package["volumes"]), 2)
+        self.assertEqual(len(package["chapters"]), 2)
+        self.assertEqual(len(package["maps"]), 2)
+        self.assertEqual(len(package["nodes"]), 3)
+        self.assertEqual(len(package["edges"]), 1)
+        self.assertEqual(package["notes"][0]["content"], "不可忽视的线索")
+
+        imported = self.client.post(
+            "/api/projects/import", json={**package, "title": "完整项目包副本"}
+        )
+        self.assertEqual(imported.status_code, 201)
+        clone = imported.json()
+        self.assertEqual(clone["title"], "完整项目包副本")
+        self.assertEqual(clone["description"], "项目包说明")
+        self.assertNotEqual(clone["id"], project["id"])
+        self.assertEqual(len(clone["volumes"]), 2)
+        self.assertEqual(len(clone["chapters"]), 2)
+        self.assertEqual(len(clone["maps"]), 2)
+        self.assertEqual(len(clone["nodes"]), 3)
+        self.assertEqual(len(clone["edges"]), 1)
+        self.assertEqual(len(clone["notes"]), 1)
+        cloned_chapter = next(item for item in clone["chapters"] if item["title"] == "雨夜")
+        self.assertNotEqual(cloned_chapter["id"], chapter["id"])
+        self.assertEqual(cloned_chapter["content"], chapter["content"])
+        self.assertEqual(
+            next(volume for volume in clone["volumes"] if volume["title"] == "第二卷")["id"],
+            next(item for item in clone["chapters"] if item["title"] == "第二章")["volume_id"],
+        )
+        cloned_source = next(item for item in clone["nodes"] if item["label"] == "主角登场")
+        cloned_target = next(item for item in clone["nodes"] if item["label"] == "关键人物")
+        self.assertNotEqual(cloned_source["id"], source["id"])
+        self.assertNotEqual(cloned_source["map_id"], story_map["id"])
+        self.assertEqual(cloned_source["chapter_id"], cloned_chapter["id"])
+        self.assertEqual(cloned_source["x"], 125)
+        self.assertEqual(clone["edges"][0]["source_id"], cloned_source["id"])
+        self.assertEqual(clone["edges"][0]["target_id"], cloned_target["id"])
+        self.assertEqual(clone["edges"][0]["source_port"], "bottom")
+        self.assertTrue(clone["notes"][0]["locked"])
+        self.assertNotEqual(clone["notes"][0]["id"], package["notes"][0]["key"])
+
+        before_count = len(self.client.get("/api/projects").json())
+        invalid_package = {**package, "title": "不应被创建", "chapters": [
+            {**package["chapters"][0], "volume_key": "missing-volume"},
+            *package["chapters"][1:],
+        ]}
+        invalid = self.client.post("/api/projects/import", json=invalid_package)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(len(self.client.get("/api/projects").json()), before_count)
 
     def test_legacy_scenes_are_promoted_to_chapters_and_links_follow(self):
         project = self.client.post(

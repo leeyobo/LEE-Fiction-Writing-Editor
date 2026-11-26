@@ -1,6 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const REQUIRED_API_VERSION = "0.15.0";
+const REQUIRED_API_VERSION = "0.16.0";
 
 const state = {
   config: {
@@ -37,6 +37,12 @@ const state = {
   selectedMarkdownExportChapterIds: new Set(),
   selectedStoryMapExportIds: new Set(),
   storyMapExportBusy: false,
+  pendingProjectPackage: null,
+  projectPackageImportBusy: false,
+  pendingChapterSave: null,
+  chapterSavePromise: null,
+  pendingNodeSave: null,
+  nodeSavePromise: null,
   pendingStoryMapPackage: null,
   storyMapImportBusy: false,
   pendingVolumeDeleteId: null,
@@ -1943,20 +1949,98 @@ function queueDocumentSave() {
   if (!document) return;
   document.title = $("#chapterTitleInput").value.trim() || "未命名章节";
   document.content = editorToMarkdown();
+  const pending = { document, title: document.title, content: document.content };
+  state.pendingChapterSave = pending;
   $("#chapterWords").textContent = `${wordCount(document.content)} 字`;
   renderChapters();
   renderSplitPane();
   setSaveState("保存中", "saving");
   clearTimeout(state.chapterTimer);
-  state.chapterTimer = setTimeout(async () => {
-    try {
-      const updated = await api(`/api/chapters/${document.id}`, { method: "PATCH", body: JSON.stringify({ title: document.title, content: document.content }) });
-      Object.assign(document, updated);
-      setSaveState("已同步", "saved");
-    } catch (error) {
-      setSaveState("保存失败", "error"); toast(error.message);
-    }
+  state.chapterTimer = setTimeout(() => {
+    state.chapterTimer = null;
+    if (state.pendingChapterSave === pending) state.pendingChapterSave = null;
+    const request = persistPendingChapterSnapshot(pending);
+    state.chapterSavePromise = request;
+    request.finally(() => {
+      if (state.chapterSavePromise === request) state.chapterSavePromise = null;
+    }).catch(() => {});
   }, 650);
+}
+
+async function persistChapterSnapshot(pending) {
+  try {
+    const updated = await api(`/api/chapters/${pending.document.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: pending.title, content: pending.content }),
+    });
+    Object.assign(pending.document, updated);
+    setSaveState("已同步", "saved");
+    return updated;
+  } catch (error) {
+    setSaveState("保存失败", "error");
+    toast(error.message);
+    throw error;
+  }
+}
+
+function persistPendingChapterSnapshot(pending) {
+  return persistChapterSnapshot(pending).catch(error => {
+    if (!state.pendingChapterSave) state.pendingChapterSave = pending;
+    throw error;
+  });
+}
+
+async function flushPendingProjectEdits() {
+  if (state.chapterTimer !== null) {
+    clearTimeout(state.chapterTimer);
+    state.chapterTimer = null;
+  }
+  if (state.chapterSavePromise) await state.chapterSavePromise;
+  const pendingChapter = state.pendingChapterSave;
+  if (pendingChapter) {
+    state.pendingChapterSave = null;
+    const request = persistPendingChapterSnapshot(pendingChapter);
+    state.chapterSavePromise = request;
+    request.finally(() => {
+      if (state.chapterSavePromise === request) state.chapterSavePromise = null;
+    }).catch(() => {});
+    await request;
+  }
+
+  if (state.nodeTimer !== null) {
+    clearTimeout(state.nodeTimer);
+    state.nodeTimer = null;
+  }
+  if (state.nodeSavePromise) {
+    const saved = await state.nodeSavePromise;
+    if (!saved) throw new Error("节点修改尚未保存，请检查服务器连接后重试");
+  }
+  const pendingNode = state.pendingNodeSave;
+  if (pendingNode) {
+    const request = api(`/api/nodes/${pendingNode.node.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(pendingNode.payload),
+    }).then(updated => {
+      Object.assign(pendingNode.node, updated);
+      setSaveState("已同步", "saved");
+      return updated;
+    });
+    state.nodeSavePromise = request;
+    request.finally(() => {
+      if (state.nodeSavePromise === request) state.nodeSavePromise = null;
+    }).catch(() => {});
+    let saved;
+    try {
+      saved = await request;
+    } catch (error) {
+      if (!state.pendingNodeSave) state.pendingNodeSave = pendingNode;
+      throw error;
+    }
+    if (!saved) {
+      if (!state.pendingNodeSave) state.pendingNodeSave = pendingNode;
+      throw new Error("节点修改尚未保存，请检查服务器连接后重试");
+    }
+  }
 }
 
 async function addChapterToVolume(volumeId) {
@@ -1995,7 +2079,141 @@ function showImportExportOverview() {
   $("#chapterMarkdownExportPanel").hidden = true;
   $("#storyMapExportPanel").hidden = true;
   $("#storyMapImportPanel").hidden = true;
+  $("#projectPackageImportPanel").hidden = true;
   $("#backToImportExportButton").hidden = true;
+}
+
+function safeProjectFilename(title) {
+  let stem = String(title || "墨图作品").trim()
+    .replace(/\.(?:leeproj|json)$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 100);
+  if (!stem) stem = "墨图作品";
+  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
+  return `${stem}.leeproj`;
+}
+
+async function exportCurrentProjectPackage() {
+  if (!requireProject("导出完整作品")) return;
+  const button = $("#exportProjectPackageButton");
+  button.disabled = true;
+  const originalText = button.querySelector("strong").textContent;
+  button.querySelector("strong").textContent = "正在导出…";
+  try {
+    await flushPendingProjectEdits();
+    const blob = await apiBlob(`/api/projects/${state.project.id}/package`);
+    downloadBlob(safeProjectFilename(state.project.title), blob);
+    toast(`已导出完整作品“${state.project.title}”`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.querySelector("strong").textContent = originalText;
+  }
+}
+
+function openProjectPackageImportPanel() {
+  if (!requireProject("导入完整作品")) return;
+  state.pendingProjectPackage = null;
+  state.projectPackageImportBusy = false;
+  $("#projectPackageFile").value = "";
+  $("#projectPackageTitle").value = "";
+  renderProjectPackageImportSummary();
+  $("#importExportDialogTitle").textContent = "导入完整作品";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
+  $("#storyMapExportPanel").hidden = true;
+  $("#storyMapImportPanel").hidden = true;
+  $("#projectPackageImportPanel").hidden = false;
+  $("#backToImportExportButton").hidden = false;
+}
+
+async function selectProjectPackageFile(file) {
+  state.pendingProjectPackage = null;
+  if (!file) { renderProjectPackageImportSummary(); return; }
+  if (!/\.(?:leeproj|json)$/i.test(file.name)) {
+    renderProjectPackageImportSummary("请选择 .leeproj 或 JSON 完整项目包");
+    return;
+  }
+  if (file.size > 100 * 1024 * 1024) {
+    renderProjectPackageImportSummary("完整项目包不能超过 100 MB");
+    return;
+  }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()).replace(/^\uFEFF/, "");
+    const data = JSON.parse(text);
+    if (!data || data.format !== "lee-project" || data.version !== 1 || typeof data.title !== "string"
+      || typeof data.description !== "string" || !Array.isArray(data.volumes) || !Array.isArray(data.chapters)
+      || !Array.isArray(data.maps) || !Array.isArray(data.nodes) || !Array.isArray(data.edges) || !Array.isArray(data.notes)) {
+      throw new Error("文件格式不受支持，请选择墨图导出的完整作品包");
+    }
+    if (!data.volumes.length || !data.maps.length || data.volumes.length > 500 || data.chapters.length > 10000
+      || data.maps.length > 100 || data.nodes.length > 50000 || data.edges.length > 100000 || data.notes.length > 100000) {
+      throw new Error("项目包内容数量超出限制，请检查文件内容");
+    }
+    if (data.volumes.some(item => !item || typeof item.key !== "string" || typeof item.title !== "string")
+      || data.chapters.some(item => !item || typeof item.key !== "string" || typeof item.title !== "string" || typeof item.content !== "string")
+      || data.maps.some(item => !item || typeof item.key !== "string" || typeof item.title !== "string")
+      || data.nodes.some(item => !item || typeof item.key !== "string" || typeof item.map_key !== "string" || typeof item.label !== "string")
+      || data.edges.some(item => !item || typeof item.key !== "string" || typeof item.map_key !== "string" || typeof item.source_key !== "string" || typeof item.target_key !== "string")
+      || data.notes.some(item => !item || typeof item.key !== "string" || typeof item.node_key !== "string" || typeof item.content !== "string")) {
+      throw new Error("项目包中的卷、章节或地图数据结构不完整");
+    }
+    if (data.chapters.some(item => item.content.length > 50_000_000)
+      || data.chapters.reduce((sum, item) => sum + item.content.length, 0)
+        + data.notes.reduce((sum, item) => sum + item.content.length, 0) > 100_000_000) {
+      throw new Error("项目包正文或便签总量超出支持范围");
+    }
+    state.pendingProjectPackage = data;
+    $("#projectPackageTitle").value = data.title.slice(0, 120);
+    renderProjectPackageImportSummary();
+  } catch (error) {
+    renderProjectPackageImportSummary(error instanceof SyntaxError ? "无法解析该文件：请检查 JSON 格式" : error.message);
+  }
+}
+
+function renderProjectPackageImportSummary(error = "") {
+  const summary = $("#projectPackageImportSummary");
+  const button = $("#confirmProjectPackageImportButton");
+  const data = state.pendingProjectPackage;
+  const title = $("#projectPackageTitle").value.trim();
+  const validationError = error || (data && !title ? "请输入导入后作品名称" : "");
+  summary.classList.toggle("error", Boolean(validationError));
+  summary.textContent = validationError || (data
+    ? `已读取“${data.title}” · ${data.volumes.length} 卷 · ${data.chapters.length} 章 · ${data.maps.length} 张地图 · ${data.nodes.length} 个节点 · ${data.edges.length} 条连线 · ${data.notes.length} 条便签`
+    : "尚未选择项目包");
+  button.disabled = !data || Boolean(validationError) || state.projectPackageImportBusy;
+  button.textContent = state.projectPackageImportBusy ? "正在导入新作品…" : "导入为新作品";
+}
+
+async function importProjectPackage() {
+  const data = state.pendingProjectPackage;
+  if (!data) return;
+  const title = $("#projectPackageTitle").value.trim();
+  if (!title) { toast("请输入导入后作品名称"); return; }
+  state.projectPackageImportBusy = true;
+  renderProjectPackageImportSummary();
+  try {
+    await flushPendingProjectEdits();
+    const project = await api("/api/projects/import", {
+      method: "POST",
+      body: JSON.stringify({ ...data, title }),
+    });
+    state.projects = [project, ...state.projects.filter(item => item.id !== project.id)];
+    $("#importExportDialog").close();
+    await loadProject(project.id);
+    toast(`已将“${project.title}”导入为新作品`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    state.projectPackageImportBusy = false;
+    renderProjectPackageImportSummary();
+  }
 }
 
 function safeStoryMapFilename(title) {
@@ -3477,15 +3695,30 @@ function queueNodeSave(event) {
   if (event?.target?.id === "nodeChapter") node.chapter_id = event.target.value || null;
   renderMap();
   $("#jumpChapterButton").disabled = !node.chapter_id;
+  const payload = { label: node.label, node_type: node.node_type, chapter_id: node.chapter_id, color: node.color };
+  const pending = { node, payload };
+  state.pendingNodeSave = pending;
   clearTimeout(state.nodeTimer);
-  state.nodeTimer = setTimeout(() => saveNode(node, { label: node.label, node_type: node.node_type, chapter_id: node.chapter_id, color: node.color }), 450);
+  state.nodeTimer = setTimeout(() => {
+    state.nodeTimer = null;
+    if (state.pendingNodeSave === pending) state.pendingNodeSave = null;
+    const request = saveNode(node, payload).then(saved => {
+      if (!saved && !state.pendingNodeSave) state.pendingNodeSave = pending;
+      return saved;
+    });
+    state.nodeSavePromise = request;
+    request.finally(() => {
+      if (state.nodeSavePromise === request) state.nodeSavePromise = null;
+    }).catch(() => {});
+  }, 450);
 }
 
 async function saveNode(node, payload) {
   try {
     const updated = await api(`/api/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify(payload) });
     Object.assign(node, updated); setSaveState("已同步", "saved");
-  } catch (error) { setSaveState("保存失败", "error"); toast(error.message); }
+    return true;
+  } catch (error) { setSaveState("保存失败", "error"); toast(error.message); return false; }
 }
 
 function openNodeLinkedContent(node) {
@@ -4100,6 +4333,12 @@ function bindEvents() {
   $("#storyMapImportTitle").addEventListener("input", () => renderStoryMapImportSummary());
   $("#confirmStoryMapImportButton").addEventListener("click", importStoryMapPackage);
   $("#backFromStoryMapImportButton").addEventListener("click", showImportExportOverview);
+  $("#exportProjectPackageButton").addEventListener("click", exportCurrentProjectPackage);
+  $("#openProjectPackageImportButton").addEventListener("click", openProjectPackageImportPanel);
+  $("#projectPackageFile").addEventListener("change", event => selectProjectPackageFile(event.currentTarget.files[0]));
+  $("#projectPackageTitle").addEventListener("input", () => renderProjectPackageImportSummary());
+  $("#confirmProjectPackageImportButton").addEventListener("click", importProjectPackage);
+  $("#backFromProjectPackageImportButton").addEventListener("click", showImportExportOverview);
   $("#openTxtImportFromTransfer").addEventListener("click", openTxtImportPanel);
   $("#openFullBookImportFromTransfer").addEventListener("click", openFullBookImportPanel);
   $("#openChapterTxtExportButton").addEventListener("click", openChapterTxtExportPanel);
@@ -4212,14 +4451,18 @@ function bindEvents() {
     state.storyMapExportBusy = false;
     state.pendingStoryMapPackage = null;
     state.storyMapImportBusy = false;
+    state.pendingProjectPackage = null;
+    state.projectPackageImportBusy = false;
     $("#importTxtFiles").value = "";
     $("#fullBookImportFile").value = "";
     $("#markdownImportFiles").value = "";
     $("#storyMapPackageFile").value = "";
+    $("#projectPackageFile").value = "";
     renderTxtImportFileSummary();
     renderFullBookImportPreview();
     renderMarkdownImportSummary();
     renderStoryMapImportSummary();
+    renderProjectPackageImportSummary();
     showImportExportOverview();
   });
   $("#addVolumeButton").addEventListener("click", openNewVolumeDialog);

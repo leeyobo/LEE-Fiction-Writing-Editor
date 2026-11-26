@@ -344,13 +344,13 @@
       <form method="dialog">
         <div class="modal-heading"><div><p class="eyebrow">IMPORT / EXPORT</p><h2 id="importExportDialogTitle">导入 / 导出</h2></div><div class="transfer-heading-actions"><button id="backToImportExportButton" class="transfer-back-button" type="button" hidden>← 返回</button><button value="cancel" type="submit" aria-label="关闭">×</button></div></div>
         <section id="importExportOverview" class="transfer-overview">
-          <p class="modal-copy">选择要处理的内容类型。完整作品项目包仍在规划中，章节正文和故事地图可分别导入或导出。</p>
+          <p class="modal-copy">选择要处理的内容类型。完整项目包可导出或导入为新作品；章节正文和故事地图也可分别处理。</p>
           <div class="transfer-groups">
             <section class="transfer-group">
               <h3>当前作品 · 完整项目包</h3>
               <div class="transfer-actions">
-                <button class="transfer-action" type="button" disabled><strong>导出当前作品</strong><span>.leeproj 项目文件</span><small>规划中</small></button>
-                <button class="transfer-action" type="button" disabled><strong>导入完整项目</strong><span>作为新作品导入</span><small>规划中</small></button>
+                <button id="exportProjectPackageButton" class="transfer-action transfer-action-available" type="button"><strong>导出当前作品</strong><span>.leeproj 项目文件</span><small>可用</small></button>
+                <button id="openProjectPackageImportButton" class="transfer-action transfer-action-available" type="button"><strong>导入完整项目</strong><span>作为新作品导入</span><small>可用</small></button>
               </div>
               <p>包含故事卷、章节正文与故事地图。</p>
             </section>
@@ -434,6 +434,13 @@
           <label id="storyMapReplacementTargetField" hidden>要替换的地图<select id="storyMapReplacementTarget"></select></label>
           <div id="storyMapImportSummary" class="txt-import-summary" aria-live="polite">尚未选择数据包</div>
           <div class="modal-actions"><button id="backFromStoryMapImportButton" class="secondary-button" type="button">返回</button><button id="confirmStoryMapImportButton" class="wide-button" type="button" disabled>导入为新地图</button></div>
+        </section>
+        <section id="projectPackageImportPanel" class="txt-import-panel" hidden>
+          <p class="modal-copy">选择墨图完整作品包（.leeproj 或 JSON）。导入会创建一部新作品，不会覆盖当前作品；故事卷、章节正文、故事地图、节点、连线与便签都会保留。</p>
+          <label class="txt-file-picker">选择完整项目包<input id="projectPackageFile" type="file" accept=".leeproj,.json,application/json" /></label>
+          <label>新作品名称<input id="projectPackageTitle" maxlength="120" placeholder="作品名称" autocomplete="off" /></label>
+          <div id="projectPackageImportSummary" class="txt-import-summary" aria-live="polite">尚未选择项目包</div>
+          <div class="modal-actions"><button id="backFromProjectPackageImportButton" class="secondary-button" type="button">返回</button><button id="confirmProjectPackageImportButton" class="wide-button" type="button" disabled>导入为新作品</button></div>
         </section>
       </form>
     </dialog>
