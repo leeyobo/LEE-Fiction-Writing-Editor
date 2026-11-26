@@ -297,6 +297,16 @@ class ChapterCreate(BaseModel):
     volume_id: Optional[str] = None
 
 
+class TextChapterImportItem(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(default="", max_length=2_000_000)
+
+
+class TextChapterImport(BaseModel):
+    volume_id: str = Field(min_length=1)
+    files: List[TextChapterImportItem] = Field(min_length=1, max_length=50)
+
+
 class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=120)
     content: Optional[str] = None
@@ -374,7 +384,7 @@ class EdgeUpdate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.10.0",
+    version="0.11.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -392,7 +402,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.10.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.11.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -664,6 +674,43 @@ def create_chapter(project_id: str, payload: ChapterCreate):
         connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
         row = connection.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
     return dict(row)
+
+
+@app.post("/api/projects/{project_id}/chapters/import-text", status_code=201, dependencies=[Depends(authorize)])
+def import_text_chapters(project_id: str, payload: TextChapterImport):
+    total_characters = sum(len(item.content) for item in payload.files)
+    if total_characters > 10_000_000:
+        raise HTTPException(status_code=413, detail="TXT 文件总内容过大，请分批导入（总计不超过 1000 万字）")
+    timestamp = now()
+    imported = []
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        volume = connection.execute(
+            "SELECT id FROM volumes WHERE id = ? AND project_id = ?",
+            (payload.volume_id, project_id),
+        ).fetchone()
+        if not volume:
+            raise HTTPException(status_code=400, detail="故事卷不存在或不属于当前作品")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM chapters WHERE volume_id = ?",
+            (payload.volume_id,),
+        ).fetchone()["position"]
+        for offset, item in enumerate(payload.files):
+            chapter_id = new_id("chapter")
+            connection.execute(
+                """INSERT INTO chapters(id, project_id, volume_id, title, content, position, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    chapter_id, project_id, payload.volume_id, item.title, item.content,
+                    position + offset, timestamp, timestamp,
+                ),
+            )
+            row = connection.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+            imported.append(dict(row))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
+    return {"chapters": imported}
 
 
 @app.patch("/api/chapters/{chapter_id}", dependencies=[Depends(authorize)])

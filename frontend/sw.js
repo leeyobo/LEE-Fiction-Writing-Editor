@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v57-multiselect-node-drag";
+const CACHE = "motu-shell-v59-import-export-dialog";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

@@ -316,6 +316,38 @@ class ApiFlowTest(unittest.TestCase):
         refused = self.client.delete(f"/api/volumes/{first_volume['id']}")
         self.assertEqual(refused.status_code, 409)
 
+    def test_import_txt_files_as_new_chapters_in_selected_volume(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "TXT import", "description": ""}
+        ).json()
+        second_volume = self.client.post(
+            f"/api/projects/{project['id']}/volumes", json={"title": "第二卷"}
+        ).json()
+        response = self.client.post(
+            f"/api/projects/{project['id']}/chapters/import-text",
+            json={
+                "volume_id": second_volume["id"],
+                "files": [
+                    {"title": "新章节 A", "content": "第一段\n第二段"},
+                    {"title": "新章节 B", "content": "正文 B"},
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        imported = response.json()["chapters"]
+        self.assertEqual([chapter["title"] for chapter in imported], ["新章节 A", "新章节 B"])
+        self.assertEqual([chapter["content"] for chapter in imported], ["第一段\n第二段", "正文 B"])
+        self.assertEqual([chapter["position"] for chapter in imported], [0, 1])
+        self.assertTrue(all(chapter["volume_id"] == second_volume["id"] for chapter in imported))
+
+        invalid_volume = self.client.post(
+            f"/api/projects/{project['id']}/chapters/import-text",
+            json={"volume_id": "volume_other_project", "files": [{"title": "不应写入", "content": "正文"}]},
+        )
+        self.assertEqual(invalid_volume.status_code, 400)
+        final_project = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual(len(final_project["chapters"]), 3)
+
     def test_existing_chapters_migrate_to_a_default_volume(self):
         legacy_path = Path(self.temporary_directory.name) / "legacy-volume.db"
         timestamp = main.now()

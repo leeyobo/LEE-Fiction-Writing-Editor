@@ -1,6 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const REQUIRED_API_VERSION = "0.10.0";
+const REQUIRED_API_VERSION = "0.11.0";
 
 const state = {
   config: {
@@ -27,6 +27,7 @@ const state = {
   chapterBulkMode: false,
   selectedChapterIds: new Set(),
   pendingChapterDeleteIds: [],
+  pendingTxtFiles: [],
   pendingVolumeDeleteId: null,
   collapsedVolumeIds: new Set(),
   storyMapsCollapsed: false,
@@ -1785,6 +1786,114 @@ async function addChapterToVolume(volumeId) {
   } catch (error) { toast(error.message); }
 }
 
+function showImportExportOverview() {
+  $("#importExportDialogTitle").textContent = "导入 / 导出";
+  $("#importExportOverview").hidden = false;
+  $("#txtImportPanel").hidden = true;
+  $("#backToImportExportButton").hidden = true;
+}
+
+function openImportExportDialog() {
+  if (!requireProject("导入/导出")) return;
+  showImportExportOverview();
+  $("#importExportDialog").showModal();
+}
+
+function openTxtImportPanel() {
+  if (!requireProject("导入 TXT 章节")) return;
+  const volumeSelect = $("#importTxtVolume");
+  volumeSelect.innerHTML = state.project.volumes
+    .map(volume => `<option value="${volume.id}">${escapeHtml(volume.title)}</option>`)
+    .join("");
+  const activeVolumeId = state.project.chapters.find(chapter => chapter.id === state.activeChapterId)?.volume_id;
+  volumeSelect.value = state.project.volumes.some(volume => volume.id === activeVolumeId)
+    ? activeVolumeId
+    : state.project.volumes[0]?.id || "";
+  $("#importTxtFiles").value = "";
+  $("#importTxtEncoding").value = "utf-8";
+  state.pendingTxtFiles = [];
+  renderTxtImportFileSummary();
+  $("#importExportDialogTitle").textContent = "导入 TXT 章节";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = false;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function renderTxtImportFileSummary() {
+  const files = state.pendingTxtFiles;
+  const fileList = $("#importTxtFileList");
+  const summary = $("#importTxtSummary");
+  const importButton = $("#confirmImportTxtButton");
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  let error = "";
+  if (files.length > 50) error = "一次最多导入 50 个 TXT 文件";
+  else if (files.some(file => file.size > 5 * 1024 * 1024)) error = "单个文件不能超过 5 MB";
+  else if (totalBytes > 10 * 1024 * 1024) error = "本次文件总大小不能超过 10 MB，请分批导入";
+  else if (files.some(file => !file.name.toLowerCase().endsWith(".txt"))) error = "请选择 .txt 文本文件";
+
+  fileList.replaceChildren(...files.map(file => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    const size = document.createElement("span");
+    name.textContent = file.name;
+    size.textContent = `${(file.size / 1024).toFixed(file.size >= 1024 * 1024 ? 0 : 1)} ${file.size >= 1024 * 1024 ? "MB" : "KB"}`;
+    item.append(name, size);
+    return item;
+  }));
+  summary.classList.toggle("error", Boolean(error));
+  summary.textContent = error || (files.length
+    ? `已选 ${files.length} 个文件 · ${(totalBytes / 1024).toFixed(1)} KB · 将创建为新章节`
+    : "尚未选择文件");
+  importButton.disabled = !files.length || Boolean(error) || !$("#importTxtVolume").value;
+}
+
+function chapterTitleFromTxtFile(file) {
+  const title = file.name.replace(/\.txt$/i, "").trim();
+  return (title || "未命名章节").slice(0, 120);
+}
+
+async function importTxtFiles() {
+  if (!state.project) return;
+  const files = [...state.pendingTxtFiles].sort((left, right) => left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" }));
+  if (!files.length) return;
+  const volumeId = $("#importTxtVolume").value;
+  const volume = state.project.volumes.find(item => item.id === volumeId);
+  if (!volume) { toast("请选择要导入到的故事卷"); return; }
+  const button = $("#confirmImportTxtButton");
+  const encoding = $("#importTxtEncoding").value;
+  button.disabled = true;
+  button.textContent = "正在读取并导入…";
+  try {
+    const importedFiles = await Promise.all(files.map(async file => {
+      const buffer = await file.arrayBuffer();
+      let content;
+      try {
+        content = new TextDecoder(encoding, { fatal: true }).decode(buffer).replace(/^\uFEFF/, "");
+      } catch (_) {
+        throw new Error(`“${file.name}”无法按 ${encoding.toUpperCase()} 解码，请检查文件编码后重试`);
+      }
+      return { title: chapterTitleFromTxtFile(file), content };
+    }));
+    const result = await api(`/api/projects/${state.project.id}/chapters/import-text`, {
+      method: "POST",
+      body: JSON.stringify({ volume_id: volumeId, files: importedFiles }),
+    });
+    state.project.chapters.push(...result.chapters);
+    sortProjectChapters();
+    state.chapterBulkMode = false;
+    state.selectedChapterIds.clear();
+    $("#importExportDialog").close();
+    renderChapterOptions();
+    selectChapter(result.chapters[0].id);
+    toast(`已将 ${result.chapters.length} 个 TXT 文件导入“${volume.title}”`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.textContent = "导入为新章节";
+    renderTxtImportFileSummary();
+  }
+}
+
 function openNewVolumeDialog() {
   if (!requireProject("新建故事卷")) return;
   $("#newVolumeTitle").value = `第 ${state.project.volumes.length + 1} 卷`;
@@ -2779,6 +2888,22 @@ function bindEvents() {
     const item = event.target.closest(".chapter-item"); if (item) selectChapter(item.dataset.chapterId);
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
+  $("#openImportExportButton").addEventListener("click", openImportExportDialog);
+  $("#openTxtImportFromTransfer").addEventListener("click", openTxtImportPanel);
+  $("#backToImportExportButton").addEventListener("click", showImportExportOverview);
+  $("#backFromTxtImportButton").addEventListener("click", showImportExportOverview);
+  $("#importTxtFiles").addEventListener("change", event => {
+    state.pendingTxtFiles = [...event.currentTarget.files];
+    renderTxtImportFileSummary();
+  });
+  $("#importTxtVolume").addEventListener("change", renderTxtImportFileSummary);
+  $("#confirmImportTxtButton").addEventListener("click", importTxtFiles);
+  $("#importExportDialog").addEventListener("close", () => {
+    state.pendingTxtFiles = [];
+    $("#importTxtFiles").value = "";
+    renderTxtImportFileSummary();
+    showImportExportOverview();
+  });
   $("#addVolumeButton").addEventListener("click", openNewVolumeDialog);
   $("#saveNewVolumeButton").addEventListener("click", saveNewVolume);
   $("#newVolumeTitle").addEventListener("keydown", event => {
