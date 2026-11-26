@@ -2416,7 +2416,11 @@ async function importStoryMapPackage() {
   if (replacing && !targetMapId) { toast("请选择要替换的现有地图"); return; }
   if (!replacing && !title) { toast("请输入导入后地图名称"); return; }
   const targetMap = state.project.maps.find(storyMap => storyMap.id === targetMapId);
-  if (replacing && !window.confirm(`替换“${targetMap?.title || "所选地图"}”会移除该地图当前的节点、连线和便签，并导入数据包内容。此操作无法撤销，是否继续？`)) return;
+  if (replacing && !await confirmTransferAction(
+    "确认替换故事地图？",
+    `替换“${targetMap?.title || "所选地图"}”会移除该地图当前的节点、连线和便签，并导入数据包内容。此操作无法撤销。`,
+    "确认替换",
+  )) return;
   const button = $("#confirmStoryMapImportButton");
   state.storyMapImportBusy = true;
   renderStoryMapImportSummary();
@@ -2465,6 +2469,19 @@ function openImportExportDialog() {
   if (!requireProject("导入/导出")) return;
   showImportExportOverview();
   $("#importExportDialog").showModal();
+}
+
+function confirmTransferAction(title, message, confirmLabel = "确认继续") {
+  const dialog = $("#transferConfirmDialog");
+  $("#transferConfirmTitle").textContent = title;
+  $("#transferConfirmMessage").textContent = message;
+  $("#acceptTransferConfirmButton").textContent = confirmLabel;
+  dialog.returnValue = "";
+  return new Promise(resolve => {
+    const handleClose = () => resolve(dialog.returnValue === "confirm");
+    dialog.addEventListener("close", handleClose, { once: true });
+    dialog.showModal();
+  });
 }
 
 function openTxtImportPanel() {
@@ -2694,7 +2711,11 @@ async function importMarkdownFiles() {
   const volumeId = $("#markdownImportVolume").value;
   const volume = state.project.volumes.find(item => item.id === volumeId);
   if (mode === "new" && !volume) { toast("请选择要导入到的故事卷"); return; }
-  if (mode === "replace" && !window.confirm(`将用 ${files.length} 个 Markdown 文件分别替换所选章节的全部正文，章节标题和故事地图关联会保留。是否继续？`)) return;
+  if (mode === "replace" && !await confirmTransferAction(
+    "确认替换章节正文？",
+    `将用 ${files.length} 个 Markdown 文件分别替换所选章节的全部正文，章节标题和故事地图关联会保留。`,
+    "确认替换",
+  )) return;
   const button = $("#confirmMarkdownImportButton");
   state.markdownImportBusy = true;
   renderMarkdownImportSummary();
@@ -3085,7 +3106,11 @@ async function importTxtFiles() {
       throw new Error("本次 TXT 正文总量不能超过 1000 万字符，请分批导入");
     }
     if (mode === "existing") {
-      if (!window.confirm(`将用“${files[0].name}”替换“${targetChapter.title}”的全部正文？章节标题和故事地图关联会保留。`)) return;
+      if (!await confirmTransferAction(
+        "确认替换章节正文？",
+        `将用“${files[0].name}”替换“${targetChapter.title}”的全部正文，章节标题和故事地图关联会保留。`,
+        "确认替换",
+      )) return;
       if (targetChapter.id === state.activeChapterId) {
         clearTimeout(state.chapterTimer);
         state.chapterTimer = null;
@@ -4440,6 +4465,9 @@ function bindEvents() {
   $("#backFromMarkdownImportButton").addEventListener("click", showImportExportOverview);
   $("#importExportDialog").addEventListener("click", event => {
     if (event.target === event.currentTarget) event.currentTarget.close();
+  });
+  $("#transferConfirmDialog").addEventListener("click", event => {
+    if (event.target === event.currentTarget) event.currentTarget.close("cancel");
   });
   $("#importExportDialog").addEventListener("close", () => {
     state.pendingTxtFiles = [];

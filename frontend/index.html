@@ -445,6 +445,15 @@
       </form>
     </dialog>
 
+    <dialog id="transferConfirmDialog" class="modal confirm-modal transfer-confirm-modal" aria-labelledby="transferConfirmTitle" aria-describedby="transferConfirmMessage">
+      <form method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">请确认操作</p><h2 id="transferConfirmTitle">确认继续？</h2></div><button class="transfer-close-button" value="cancel" type="submit" aria-label="关闭确认窗口" title="关闭">×</button></div>
+        <div class="confirm-warning" aria-hidden="true">!</div>
+        <p id="transferConfirmMessage" class="modal-copy transfer-confirm-message"></p>
+        <div class="modal-actions"><button id="cancelTransferConfirmButton" class="secondary-button" value="cancel" type="submit">取消</button><button id="acceptTransferConfirmButton" class="danger-confirm-button" value="confirm" type="submit">确认继续</button></div>
+      </form>
+    </dialog>
+
     <dialog id="deleteVolumeDialog" class="modal confirm-modal">
       <form method="dialog">
         <div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DELETE VOLUME</p><h2>确认删除故事卷？</h2></div><button value="cancel" type="submit" aria-label="关闭">×</button></div>

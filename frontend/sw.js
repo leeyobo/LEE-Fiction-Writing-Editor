@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v70-transfer-dialog-polish";
+const CACHE = "motu-shell-v71-transfer-confirm-dialog";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

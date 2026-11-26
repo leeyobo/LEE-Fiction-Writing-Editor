@@ -630,6 +630,21 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .edge-color-picker [data-edge-color="rose"] { background: #dc5670; }
 .edge-color-picker [data-edge-color="slate"] { background: #64748b; }
 .confirm-modal { width: min(470px, calc(100% - 32px)); }
+.transfer-confirm-modal { width: min(500px, calc(100% - 32px)); }
+.transfer-confirm-modal .modal-heading { align-items: flex-start; }
+.transfer-confirm-modal .transfer-close-button { width: 34px; height: 34px; padding: 0 0 2px; border: 1px solid var(--line); border-radius: 9px; color: #526783; background: #f7faff; font: 500 20px/1 Arial, sans-serif; cursor: pointer; }
+.transfer-confirm-modal .transfer-close-button:hover { border-color: #9bbaf0; color: #1d4ed8; background: #eef4ff; }
+.transfer-confirm-message { margin: 0 0 12px; overflow-wrap: anywhere; }
+.transfer-confirm-modal .modal-actions { justify-content: flex-end; margin-top: 18px; }
+.transfer-confirm-modal .modal-actions button { min-width: 104px; transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.transfer-confirm-modal .modal-actions button:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(31,64,120,.14); }
+.transfer-confirm-modal .modal-actions .secondary-button:hover { color: #1d4ed8; border-color: #9bbaf0; background: #eef4ff; }
+.transfer-confirm-modal .modal-actions .danger-confirm-button:hover { background: #aa2d3f; }
+.transfer-confirm-modal .modal-actions button:focus-visible { outline: 3px solid rgba(37,99,235,.28); outline-offset: 3px; }
+.night-mode .transfer-confirm-modal .transfer-close-button { color: #c4d2e5; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .transfer-confirm-modal .transfer-close-button:hover { color: #bfdbfe; border-color: #5275a8; background: #263d5e; }
+.night-mode .transfer-confirm-modal .modal-actions .secondary-button { color: #c4d2e5; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .transfer-confirm-modal .modal-actions .secondary-button:hover { color: #bfdbfe; border-color: #5275a8; background: #263d5e; }
 .danger-eyebrow { color: #bd4050; }
 .confirm-warning { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 16px; border: 1px solid #efb6be; border-radius: 14px; color: #b52f42; background: #fff0f2; font-size: 24px; font-weight: 800; }
 .confirm-summary { margin: 0 0 8px; color: #2f3850; font-size: 15px; font-weight: 700; line-height: 1.6; }
