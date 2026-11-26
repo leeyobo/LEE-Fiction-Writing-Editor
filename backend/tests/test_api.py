@@ -1,6 +1,8 @@
+import io
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 from contextlib import closing
 from pathlib import Path
 
@@ -347,6 +349,115 @@ class ApiFlowTest(unittest.TestCase):
         self.assertEqual(invalid_volume.status_code, 400)
         final_project = self.client.get(f"/api/projects/{project['id']}").json()
         self.assertEqual(len(final_project["chapters"]), 3)
+
+    def test_markdown_import_new_and_replace_existing_chapters(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Markdown import", "description": ""}
+        ).json()
+        volume = project["volumes"][0]
+        second_volume = self.client.post(
+            f"/api/projects/{project['id']}/volumes", json={"title": "第二卷"}
+        ).json()
+        first = project["chapters"][0]
+        second = self.client.post(
+            f"/api/projects/{project['id']}/chapters",
+            json={"title": "第二卷第一章", "volume_id": second_volume["id"]},
+        ).json()
+        linked_node = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "保留关联", "chapter_id": first["id"]},
+        ).json()
+
+        created = self.client.post(
+            f"/api/projects/{project['id']}/chapters/import-markdown",
+            json={
+                "volume_id": volume["id"],
+                "files": [
+                    {"title": "导入章节 A", "content": "# A\n\n**正文 A**"},
+                    {"title": "导入章节 B", "content": "正文 B"},
+                ],
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        created_chapters = created.json()["chapters"]
+        self.assertEqual([chapter["title"] for chapter in created_chapters], ["导入章节 A", "导入章节 B"])
+        self.assertEqual(created_chapters[0]["content"], "# A\n\n**正文 A**")
+        self.assertEqual([chapter["position"] for chapter in created_chapters], [1, 2])
+
+        replaced = self.client.post(
+            f"/api/projects/{project['id']}/chapters/import-markdown",
+            json={
+                "volume_id": None,
+                "mode": "replace",
+                "files": [
+                    {"title": "不改章节标题", "target_chapter_id": first["id"], "content": "替换第一章正文"},
+                    {"title": "不改第二章标题", "target_chapter_id": second["id"], "content": "替换第二章正文"},
+                ],
+            },
+        )
+        self.assertEqual(replaced.status_code, 201)
+        self.assertEqual([chapter["title"] for chapter in replaced.json()["chapters"]], ["第一章", "第二卷第一章"])
+        self.assertEqual([chapter["content"] for chapter in replaced.json()["chapters"]], ["替换第一章正文", "替换第二章正文"])
+        invalid_replace = self.client.post(
+            f"/api/projects/{project['id']}/chapters/import-markdown",
+            json={
+                "volume_id": volume["id"],
+                "mode": "replace",
+                "files": [
+                    {"title": "A", "target_chapter_id": first["id"], "content": "不应部分写入"},
+                    {"title": "B", "target_chapter_id": "missing", "content": "无效目标"},
+                ],
+            },
+        )
+        self.assertEqual(invalid_replace.status_code, 400)
+        final_project = self.client.get(f"/api/projects/{project['id']}").json()
+        final_first = next(chapter for chapter in final_project["chapters"] if chapter["id"] == first["id"])
+        self.assertEqual(final_first["content"], "替换第一章正文")
+        self.assertEqual(next(node for node in final_project["nodes"] if node["id"] == linked_node["id"])["chapter_id"], first["id"])
+
+    def test_markdown_zip_export_and_import_parser_roundtrip(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Markdown ZIP", "description": ""}
+        ).json()
+        volume = project["volumes"][0]
+        export = self.client.post(
+            f"/api/projects/{project['id']}/chapters/export-markdown-zip",
+            json={
+                "files": [
+                    {"title": "第一章", "volume_title": "第一卷", "content": "**正文一**"},
+                    {"title": "第二章", "volume_title": "第一卷", "content": "正文二"},
+                    {"title": "第一章", "volume_title": "第二卷", "content": "同名章节"},
+                ],
+            },
+        )
+        self.assertEqual(export.status_code, 200)
+        self.assertEqual(export.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(export.content)) as archive:
+            self.assertEqual(archive.namelist(), ["第一卷/第一章.md", "第一卷/第二章.md", "第二卷/第一章.md"])
+            self.assertEqual(archive.read("第一卷/第一章.md").decode("utf-8"), "# 第一章\n\n**正文一**")
+        parsed = self.client.post(
+            f"/api/projects/{project['id']}/chapters/parse-markdown-zip",
+            content=export.content,
+            headers={"Content-Type": "application/zip"},
+        )
+        self.assertEqual(parsed.status_code, 200)
+        self.assertEqual([item["title"] for item in parsed.json()["files"]], ["第一章", "第二章", "第一章"])
+        imported = self.client.post(
+            f"/api/projects/{project['id']}/chapters/import-markdown",
+            json={"volume_id": volume["id"], "files": [
+                {"title": item["title"], "content": item["content"]}
+                for item in parsed.json()["files"]
+            ]},
+        )
+        self.assertEqual(imported.status_code, 201)
+        self.assertEqual(len(imported.json()["chapters"]), 3)
+
+        invalid_zip = self.client.post(
+            f"/api/projects/{project['id']}/chapters/parse-markdown-zip",
+            content=b"not a zip",
+            headers={"Content-Type": "application/zip"},
+        )
+        self.assertEqual(invalid_zip.status_code, 400)
 
     def test_existing_chapters_migrate_to_a_default_volume(self):
         legacy_path = Path(self.temporary_directory.name) / "legacy-volume.db"

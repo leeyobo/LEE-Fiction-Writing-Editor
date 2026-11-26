@@ -365,8 +365,8 @@
             <section class="transfer-group transfer-group-chapters">
               <h3>章节正文</h3>
               <div class="transfer-actions transfer-actions-chapters">
-                <button class="transfer-action" type="button" disabled><strong>导出 Markdown 压缩包</strong><span>.zip · 每章一个 .md</span><small>规划中</small></button>
-                <button class="transfer-action" type="button" disabled><strong>导入 Markdown 文件或压缩包</strong><span>导入为新章节</span><small>规划中</small></button>
+                <button id="openChapterMarkdownExportButton" class="transfer-action transfer-action-available" type="button"><strong>导出 Markdown</strong><span>.md · 单章、多章均可</span><small>可用</small></button>
+                <button id="openMarkdownImportButton" class="transfer-action transfer-action-available" type="button"><strong>导入 Markdown 文件或压缩包</strong><span>新建章节或替换正文</span><small>可用</small></button>
                 <button id="openChapterTxtExportButton" class="transfer-action transfer-action-available" type="button"><strong>导出章节</strong><span>从章节列表单选或多选</span><small>可用</small></button>
                 <button id="exportBookTxtButton" class="transfer-action transfer-action-available" type="button"><strong>导出全书</strong><span>.txt · 按故事卷与章节整理</span><small>可用</small></button>
                 <button id="openTxtImportFromTransfer" class="transfer-action transfer-action-available" type="button"><strong>导入 TXT 文件</strong><span>自动编号新章节或替换正文</span><small>可用</small></button>
@@ -397,12 +397,28 @@
           <ul id="fullBookChapterPreview" class="txt-import-file-list" aria-label="识别到的章节"></ul>
           <div class="modal-actions"><button id="backFromFullBookImportButton" class="secondary-button" type="button">返回</button><button id="confirmFullBookImportButton" class="wide-button" type="button" disabled>导入为新章节</button></div>
         </section>
+        <section id="markdownImportPanel" class="txt-import-panel" hidden>
+          <p class="modal-copy">可选择一个或多个 .md 文件，也可选择单个 ZIP 压缩包（其中每个 .md 文件都会作为一个章节）。新建章节使用文件名作为标题；替换正文时会保留章节标题与故事地图关联。</p>
+          <label id="markdownImportVolumeField">新建章节到故事卷<select id="markdownImportVolume"></select></label>
+          <label>导入方式<select id="markdownImportMode"><option value="new">新建章节（使用文件名）</option><option value="replace">替换已有章节正文</option></select></label>
+          <label class="txt-file-picker">选择 Markdown 文件或 ZIP<input id="markdownImportFiles" type="file" accept=".md,.markdown,.zip,text/markdown,application/zip" multiple /></label>
+          <div id="markdownImportSummary" class="txt-import-summary" aria-live="polite">尚未选择文件</div>
+          <ul id="markdownImportFileList" class="txt-import-file-list" aria-label="待导入的 Markdown 文件"></ul>
+          <div class="modal-actions"><button id="backFromMarkdownImportButton" class="secondary-button" type="button">返回</button><button id="confirmMarkdownImportButton" class="wide-button" type="button" disabled>导入为新章节</button></div>
+        </section>
         <section id="chapterTxtExportPanel" class="chapter-txt-export-panel" hidden>
           <p class="modal-copy">从作品目录中选择要导出的章节。单选会下载该章节 TXT；多选会合并为一个 TXT，并按故事卷与章节顺序排列。</p>
           <div class="chapter-export-selection-toolbar"><label><input id="selectAllTxtExportChapters" type="checkbox" />全选</label><span id="chapterTxtExportSummary" aria-live="polite">已选择 0 个章节</span></div>
           <div id="chapterTxtExportList" class="chapter-txt-export-list" aria-label="选择要导出的章节"></div>
           <label id="chapterTxtExportModeField" class="chapter-export-mode-field" hidden><span>多选导出方式</span><select id="chapterTxtExportMode"><option value="combined">合并为一个 TXT</option><option value="separate">每章分别下载</option></select></label>
           <div class="modal-actions"><button id="backFromChapterTxtExportButton" class="secondary-button" type="button">返回</button><button id="confirmChapterTxtExportButton" class="wide-button" type="button" disabled>导出所选章节</button></div>
+        </section>
+        <section id="chapterMarkdownExportPanel" class="chapter-txt-export-panel" hidden>
+          <p class="modal-copy">选择要导出的章节。单选下载一个 .md；多选可合并成一个 Markdown、逐章下载，或打包成每章一个 .md 的 ZIP。</p>
+          <div class="chapter-export-selection-toolbar"><label><input id="selectAllMarkdownExportChapters" type="checkbox" />全选</label><span id="chapterMarkdownExportSummary" aria-live="polite">已选择 0 个章节</span></div>
+          <div id="chapterMarkdownExportList" class="chapter-txt-export-list" aria-label="选择要导出的 Markdown 章节"></div>
+          <label id="chapterMarkdownExportModeField" class="chapter-export-mode-field" hidden><span>多选导出方式</span><select id="chapterMarkdownExportMode"><option value="combined">合并为一个 Markdown</option><option value="separate">每章分别下载 .md</option><option value="zip">打包为 ZIP（每章一个 .md）</option></select></label>
+          <div class="modal-actions"><button id="backFromChapterMarkdownExportButton" class="secondary-button" type="button">返回</button><button id="confirmChapterMarkdownExportButton" class="wide-button" type="button" disabled>导出所选章节</button></div>
         </section>
       </form>
     </dialog>

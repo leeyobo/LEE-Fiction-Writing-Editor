@@ -1,6 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const REQUIRED_API_VERSION = "0.11.0";
+const REQUIRED_API_VERSION = "0.12.0";
 
 const state = {
   config: {
@@ -30,7 +30,11 @@ const state = {
   pendingTxtFiles: [],
   pendingFullBookFile: null,
   pendingFullBookChapters: [],
+  pendingMarkdownFiles: [],
+  markdownImportBusy: false,
+  pendingMarkdownIsZip: false,
   selectedTxtExportChapterIds: new Set(),
+  selectedMarkdownExportChapterIds: new Set(),
   pendingVolumeDeleteId: null,
   collapsedVolumeIds: new Set(),
   storyMapsCollapsed: false,
@@ -134,6 +138,22 @@ async function api(path, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.detail || `请求失败（${response.status}）`);
   return data;
+}
+
+async function apiBlob(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (state.config.apiKey) headers.Authorization = `Bearer ${state.config.apiKey}`;
+  let response;
+  try {
+    response = await fetch(`${normalizedServerUrl()}${path}`, { ...options, headers });
+  } catch (_) {
+    throw new Error("无法连接服务器，请检查地址、HTTPS 与跨域设置");
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `请求失败（${response.status}）`);
+  }
+  return response.blob();
 }
 
 function setSaveState(label, mode = "") {
@@ -299,6 +319,33 @@ function safeTxtFilename(title) {
   if (!stem) stem = "墨图导出";
   if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
   return `${stem}.txt`;
+}
+
+function safeMarkdownFilename(title) {
+  let stem = String(title || "").trim()
+    .replace(/\.md$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 100);
+  if (!stem) stem = "墨图导出";
+  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
+  return `${stem}.md`;
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadMarkdownFile(filename, content) {
+  downloadBlob(safeMarkdownFilename(filename), new Blob([String(content)], { type: "text/markdown;charset=utf-8" }));
 }
 
 function downloadTxtFile(filename, content) {
@@ -1939,7 +1986,9 @@ function showImportExportOverview() {
   $("#importExportOverview").hidden = false;
   $("#txtImportPanel").hidden = true;
   $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
   $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
   $("#backToImportExportButton").hidden = true;
 }
 
@@ -1971,8 +2020,260 @@ function openTxtImportPanel() {
   $("#importExportOverview").hidden = true;
   $("#txtImportPanel").hidden = false;
   $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
   $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
   $("#backToImportExportButton").hidden = false;
+}
+
+function openMarkdownImportPanel() {
+  if (!requireProject("导入 Markdown 章节")) return;
+  const activeVolumeId = state.project.chapters.find(chapter => chapter.id === state.activeChapterId)?.volume_id;
+  $("#markdownImportVolume").innerHTML = state.project.volumes
+    .map(volume => `<option value="${volume.id}">${escapeHtml(volume.title)}</option>`)
+    .join("");
+  $("#markdownImportVolume").value = state.project.volumes.some(volume => volume.id === activeVolumeId)
+    ? activeVolumeId
+    : state.project.volumes[0]?.id || "";
+  $("#markdownImportMode").value = "new";
+  $("#markdownImportFiles").value = "";
+  state.pendingMarkdownFiles = [];
+  renderMarkdownImportSummary();
+  $("#importExportDialogTitle").textContent = "导入 Markdown 章节";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = false;
+  $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function openChapterMarkdownExportPanel() {
+  if (!requireProject("导出 Markdown")) return;
+  state.selectedMarkdownExportChapterIds = new Set();
+  $("#chapterMarkdownExportMode").value = "combined";
+  renderChapterMarkdownExportList();
+  $("#importExportDialogTitle").textContent = "导出章节 Markdown";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = false;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function parseMarkdownChapterFile(name, content, size = 0) {
+  const normalized = String(content || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+  let title = String(name || "").replace(/\.(?:md|markdown)$/i, "").split(/[\\/]/).pop().trim() || "未命名章节";
+  const headingIndex = lines.findIndex(line => line.trim());
+  const heading = headingIndex >= 0 ? lines[headingIndex].match(/^\s{0,3}#\s+(.+?)\s*#*\s*$/) : null;
+  if (heading) {
+    title = heading[1].trim().slice(0, 120) || title;
+    lines.splice(headingIndex, 1);
+    while (lines.length && !lines[0].trim()) lines.shift();
+  }
+  return { name, title: title.slice(0, 120), content: lines.join("\n"), size, targetChapterId: "" };
+}
+
+async function selectMarkdownImportFiles(fileList) {
+  const files = [...(fileList || [])];
+  state.pendingMarkdownFiles = [];
+  state.pendingMarkdownIsZip = false;
+  if (!files.length) { renderMarkdownImportSummary(); return; }
+  const zipFiles = files.filter(file => file.name.toLowerCase().endsWith(".zip"));
+  if (zipFiles.length && (zipFiles.length !== 1 || files.length !== 1)) {
+    renderMarkdownImportSummary("ZIP 压缩包请单独选择，不能与 Markdown 文件混选");
+    return;
+  }
+  if (files.some(file => !/\.(?:md|markdown|zip)$/i.test(file.name))) {
+    renderMarkdownImportSummary("请选择 .md、.markdown 文件或一个 .zip 压缩包");
+    return;
+  }
+  if (files.length > 50) {
+    renderMarkdownImportSummary("一次最多导入 50 个 Markdown 文件");
+    return;
+  }
+  if (zipFiles.length) {
+    const file = zipFiles[0];
+    if (file.size > 12 * 1024 * 1024) {
+      renderMarkdownImportSummary("ZIP 文件不能超过 12 MB");
+      return;
+    }
+    renderMarkdownImportSummary("正在读取 ZIP 中的 Markdown 文件…");
+    try {
+      const archive = await api(`/api/projects/${state.project.id}/chapters/parse-markdown-zip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/zip" },
+        body: await file.arrayBuffer(),
+      });
+      state.pendingMarkdownIsZip = true;
+      state.pendingMarkdownFiles = archive.files.map(item => parseMarkdownChapterFile(item.name, item.content, item.size));
+      renderMarkdownImportSummary();
+    } catch (error) {
+      renderMarkdownImportSummary(error.message);
+    }
+    return;
+  }
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  if (files.some(file => file.size > 6 * 1024 * 1024)) {
+    renderMarkdownImportSummary("单个 Markdown 文件不能超过 6 MB");
+    return;
+  }
+  if (totalBytes > 12 * 1024 * 1024) {
+    renderMarkdownImportSummary("本次 Markdown 文件总大小不能超过 12 MB");
+    return;
+  }
+  try {
+    const decoded = await Promise.all(files.map(async file => {
+      let content;
+      try {
+        content = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+      } catch (_) {
+        throw new Error(`“${file.name}”不是有效的 UTF-8 Markdown 文件`);
+      }
+      return parseMarkdownChapterFile(file.name, content, file.size);
+    }));
+    state.pendingMarkdownFiles = decoded.sort((left, right) => left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" }));
+    renderMarkdownImportSummary();
+  } catch (error) {
+    renderMarkdownImportSummary(error.message);
+  }
+}
+
+function renderMarkdownImportSummary(error = "") {
+  const fileList = $("#markdownImportFileList");
+  const summary = $("#markdownImportSummary");
+  const button = $("#confirmMarkdownImportButton");
+  const files = state.pendingMarkdownFiles;
+  const volumeId = $("#markdownImportVolume").value;
+  const mode = $("#markdownImportMode").value;
+  const allChapters = state.project?.chapters || [];
+  const volumeChapters = mode === "replace"
+    ? allChapters
+    : allChapters.filter(chapter => chapter.volume_id === volumeId);
+  $("#markdownImportVolumeField").hidden = mode === "replace";
+  const usedTargets = new Set();
+  const usedTitles = new Set(volumeChapters.map(chapter => chapter.title.normalize("NFKC").trim().toLocaleLowerCase("zh-CN")));
+  let validationError = error;
+  if (!validationError && files.length > 50) validationError = "一次最多导入 50 个 Markdown 文件";
+  if (!validationError && files.some(file => file.content.length > 2_000_000)) validationError = "单个章节正文不能超过 200 万字符";
+  if (!validationError && files.reduce((total, file) => total + file.content.length, 0) > 10_000_000) validationError = "Markdown 正文总量不能超过 1000 万字符";
+  if (!validationError && mode === "replace" && files.length > volumeChapters.length) validationError = "当前作品中的现有章节不足以一一匹配，请改为新建章节";
+
+  fileList.replaceChildren(...files.map((file, index) => {
+    const item = document.createElement("li");
+    item.className = "markdown-import-entry";
+    const details = document.createElement("div");
+    details.className = "markdown-import-entry-details";
+    const name = document.createElement("span");
+    name.textContent = file.name;
+    const info = document.createElement("small");
+    info.textContent = `章节标题：${file.title} · ${(file.size / 1024).toFixed(file.size >= 1024 * 1024 ? 0 : 1)} ${file.size >= 1024 * 1024 ? "MB" : "KB"}`;
+    details.append(name, info);
+    item.append(details);
+    if (mode === "replace") {
+      const target = document.createElement("select");
+      target.dataset.markdownTarget = String(index);
+      const targetOptions = volumeChapters.filter(chapter => !usedTargets.has(chapter.id) || chapter.id === file.targetChapterId);
+      targetOptions.forEach(chapter => {
+        const option = document.createElement("option");
+        option.value = chapter.id;
+        option.textContent = chapterOptionLabel(chapter);
+        target.append(option);
+      });
+      let preferred = targetOptions.find(chapter => chapter.id === file.targetChapterId);
+      if (!preferred) {
+        const normalizedTitle = file.title.normalize("NFKC").trim().toLocaleLowerCase("zh-CN");
+        preferred = targetOptions.find(chapter => chapter.title.normalize("NFKC").trim().toLocaleLowerCase("zh-CN") === normalizedTitle)
+          || targetOptions.find(chapter => !usedTargets.has(chapter.id));
+      }
+      target.value = preferred?.id || "";
+      file.targetChapterId = target.value;
+      if (target.value) usedTargets.add(target.value);
+      item.append(target);
+    } else {
+      const title = document.createElement("small");
+      title.className = "markdown-import-chapter-title";
+      title.textContent = `将新建：${file.title}${usedTitles.has(file.title.normalize("NFKC").trim().toLocaleLowerCase("zh-CN")) ? "（与已有章节同名）" : ""}`;
+      item.append(title);
+    }
+    return item;
+  }));
+
+  if (!validationError && mode === "replace" && files.some(file => !file.targetChapterId)) {
+    validationError = "请为每个 Markdown 文件选择不同的目标章节";
+  }
+  if (!validationError && mode === "replace" && new Set(files.map(file => file.targetChapterId)).size !== files.length) {
+    validationError = "每个文件必须对应不同的目标章节";
+  }
+  summary.classList.toggle("error", Boolean(validationError));
+  const action = mode === "replace" ? "替换正文" : "新建章节";
+  summary.textContent = validationError || (files.length
+    ? `${state.pendingMarkdownIsZip ? "ZIP 中" : "已选"} ${files.length} 个 Markdown 文件 · ${(files.reduce((total, file) => total + file.size, 0) / 1024).toFixed(1)} KB · 将${action}`
+    : "尚未选择文件");
+  button.textContent = mode === "replace" ? "替换所选章节正文" : "导入为新章节";
+  button.disabled = !files.length || Boolean(validationError) || state.markdownImportBusy || (mode === "new" && !volumeId);
+}
+
+async function importMarkdownFiles() {
+  if (!state.project || !state.pendingMarkdownFiles.length) return;
+  const files = state.pendingMarkdownFiles;
+  const mode = $("#markdownImportMode").value;
+  const volumeId = $("#markdownImportVolume").value;
+  const volume = state.project.volumes.find(item => item.id === volumeId);
+  if (mode === "new" && !volume) { toast("请选择要导入到的故事卷"); return; }
+  if (mode === "replace" && !window.confirm(`将用 ${files.length} 个 Markdown 文件分别替换所选章节的全部正文，章节标题和故事地图关联会保留。是否继续？`)) return;
+  const button = $("#confirmMarkdownImportButton");
+  state.markdownImportBusy = true;
+  renderMarkdownImportSummary();
+  button.textContent = mode === "replace" ? "正在替换章节正文…" : "正在导入 Markdown…";
+  try {
+    const payloadFiles = files.map(file => ({
+      title: file.title,
+      content: file.content,
+      ...(mode === "replace" ? { target_chapter_id: file.targetChapterId } : {}),
+    }));
+    if (mode === "replace" && files.some(file => file.targetChapterId === state.activeChapterId)) {
+      clearTimeout(state.chapterTimer);
+      state.chapterTimer = null;
+    }
+    const result = await api(`/api/projects/${state.project.id}/chapters/import-markdown`, {
+      method: "POST",
+      body: JSON.stringify({ volume_id: mode === "new" ? volumeId : null, mode, files: payloadFiles }),
+    });
+    if (mode === "replace") {
+      result.chapters.forEach(updated => {
+        const current = state.project.chapters.find(chapter => chapter.id === updated.id);
+        if (current) Object.assign(current, updated);
+        if (updated.id === state.activeChapterId) {
+          state.editorHistories.set(updated.id, { entries: [chapterSnapshot(updated)], index: 0 });
+        }
+      });
+      updateHistoryButtons();
+    } else {
+      state.project.chapters.push(...result.chapters);
+      sortProjectChapters();
+    }
+    state.chapterBulkMode = false;
+    state.selectedChapterIds.clear();
+    $("#importExportDialog").close();
+    renderChapters();
+    renderChapterOptions();
+    if (mode === "new") selectChapter(result.chapters[0].id);
+    else if (result.chapters.some(chapter => chapter.id === state.activeChapterId)) renderEditor();
+    renderSplitPane();
+    toast(mode === "replace"
+      ? `已用 ${result.chapters.length} 个 Markdown 文件替换章节正文`
+      : `已将 ${result.chapters.length} 个 Markdown 文件导入“${volume.title}”`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    state.markdownImportBusy = false;
+    renderMarkdownImportSummary();
+  }
 }
 
 function openChapterTxtExportPanel() {
@@ -1984,7 +2285,9 @@ function openChapterTxtExportPanel() {
   $("#importExportOverview").hidden = true;
   $("#txtImportPanel").hidden = true;
   $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
   $("#chapterTxtExportPanel").hidden = false;
+  $("#chapterMarkdownExportPanel").hidden = true;
   $("#backToImportExportButton").hidden = false;
 }
 
@@ -2039,6 +2342,137 @@ function renderChapterTxtExportList() {
   exportButton.disabled = selectedCount === 0;
   exportModeField.hidden = selectedCount < 2;
   exportButton.textContent = selectedCount > 1 ? `导出所选章节（${selectedCount}）` : "导出所选章节";
+}
+
+function renderChapterMarkdownExportList() {
+  const list = $("#chapterMarkdownExportList");
+  const selectAll = $("#selectAllMarkdownExportChapters");
+  const summary = $("#chapterMarkdownExportSummary");
+  const exportButton = $("#confirmChapterMarkdownExportButton");
+  const modeField = $("#chapterMarkdownExportModeField");
+  const selectedIds = state.selectedMarkdownExportChapterIds;
+  const chapters = state.project?.chapters || [];
+  const volumes = state.project?.volumes || [];
+  list.replaceChildren(...volumes.map(volume => {
+    const volumeChapters = chapters.filter(chapter => chapter.volume_id === volume.id);
+    if (!volumeChapters.length) return null;
+    const group = document.createElement("section");
+    group.className = "chapter-txt-export-volume";
+    const heading = document.createElement("label");
+    heading.className = "chapter-txt-export-volume-heading";
+    const volumeCheckbox = document.createElement("input");
+    volumeCheckbox.type = "checkbox";
+    volumeCheckbox.dataset.markdownExportVolume = volume.id;
+    const selectedCount = volumeChapters.filter(chapter => selectedIds.has(chapter.id)).length;
+    volumeCheckbox.checked = selectedCount === volumeChapters.length;
+    volumeCheckbox.indeterminate = selectedCount > 0 && selectedCount < volumeChapters.length;
+    const volumeName = document.createElement("strong");
+    volumeName.textContent = volume.title;
+    const volumeCount = document.createElement("small");
+    volumeCount.textContent = `${volumeChapters.length} 章`;
+    heading.append(volumeCheckbox, volumeName, volumeCount);
+    const chapterList = document.createElement("div");
+    chapterList.className = "chapter-txt-export-items";
+    volumeChapters.forEach(chapter => {
+      const label = document.createElement("label");
+      label.className = "chapter-txt-export-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.markdownExportChapter = chapter.id;
+      checkbox.checked = selectedIds.has(chapter.id);
+      const title = document.createElement("span");
+      title.textContent = chapterOptionLabel(chapter);
+      label.append(checkbox, title);
+      chapterList.append(label);
+    });
+    group.append(heading, chapterList);
+    return group;
+  }).filter(Boolean));
+  const selectedCount = selectedIds.size;
+  summary.textContent = `已选择 ${selectedCount} 个章节`;
+  selectAll.checked = chapters.length > 0 && selectedCount === chapters.length;
+  selectAll.indeterminate = selectedCount > 0 && selectedCount < chapters.length;
+  exportButton.disabled = selectedCount === 0;
+  modeField.hidden = selectedCount < 2;
+  exportButton.textContent = selectedCount > 1 ? `导出所选章节（${selectedCount}）` : "导出所选章节";
+}
+
+function markdownDocumentForChapter(chapter) {
+  const body = String(chapter.content || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  return body ? `# ${chapter.title}\n\n${body}\n` : `# ${chapter.title}\n`;
+}
+
+async function exportSelectedChapterMarkdown() {
+  if (!requireProject("导出 Markdown")) return;
+  const selected = state.project.chapters
+    .filter(chapter => state.selectedMarkdownExportChapterIds.has(chapter.id))
+    .map(chapterSnapshotForExport);
+  if (!selected.length) { toast("请先选择要导出的章节"); return; }
+  if (selected.length === 1) {
+    downloadMarkdownFile(selected[0].title, markdownDocumentForChapter(selected[0]));
+    toast(`已导出章节“${selected[0].title}” Markdown`);
+    return;
+  }
+  const mode = $("#chapterMarkdownExportMode").value;
+  if (mode === "separate") {
+    const volumeTitles = new Map(state.project.volumes.map(volume => [volume.id, volume.title]));
+    const usedFilenames = new Set();
+    selected.forEach(chapter => {
+      const base = safeMarkdownFilename(`${volumeTitles.get(chapter.volume_id) || state.project.title}-${chapter.title}`);
+      const extension = ".md";
+      let filename = base;
+      let suffix = 2;
+      while (usedFilenames.has(filename.toLocaleLowerCase("zh-CN"))) {
+        filename = `${base.slice(0, -extension.length)} (${suffix})${extension}`;
+        suffix += 1;
+      }
+      usedFilenames.add(filename.toLocaleLowerCase("zh-CN"));
+      downloadBlob(filename, new Blob([markdownDocumentForChapter(chapter)], { type: "text/markdown;charset=utf-8" }));
+    });
+    toast(`已分别导出 ${selected.length} 个 Markdown 文件`);
+    return;
+  }
+  if (mode === "zip") {
+    const button = $("#confirmChapterMarkdownExportButton");
+    button.disabled = true;
+    button.textContent = "正在打包 ZIP…";
+    try {
+      const volumeTitles = new Map(state.project.volumes.map(volume => [volume.id, volume.title]));
+      const blob = await apiBlob(`/api/projects/${state.project.id}/chapters/export-markdown-zip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: selected.map(chapter => ({
+          title: chapter.title,
+          volume_title: volumeTitles.get(chapter.volume_id) || "未分类",
+          content: chapter.content || "",
+        })) }),
+      });
+      downloadBlob(safeTxtFilename(`${state.project.title}-选中章节`).replace(/\.txt$/i, ".zip"), blob);
+      toast(`已打包导出 ${selected.length} 个章节 Markdown`);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      renderChapterMarkdownExportList();
+    }
+    return;
+  }
+  const volumeTitles = new Map(state.project.volumes.map(volume => [volume.id, volume.title]));
+  const volumeOrder = new Map(state.project.volumes.map((volume, index) => [volume.id, index]));
+  selected.sort((left, right) => {
+    const volumeDifference = (volumeOrder.get(left.volume_id) ?? Number.MAX_SAFE_INTEGER)
+      - (volumeOrder.get(right.volume_id) ?? Number.MAX_SAFE_INTEGER);
+    return volumeDifference || left.position - right.position;
+  });
+  const blocks = [];
+  state.project.volumes.forEach(volume => {
+    const chapters = selected.filter(chapter => chapter.volume_id === volume.id);
+    if (!chapters.length) return;
+    blocks.push(`# ${volume.title}\n\n${chapters.map(chapter =>
+      `## ${chapter.title}\n\n${String(chapter.content || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim()}`.trimEnd(),
+    ).join("\n\n")}`);
+  });
+  downloadMarkdownFile(`${state.project.title}-选中章节`, `${blocks.join("\n\n")}\n`);
+  toast(`已合并导出 ${selected.length} 个章节 Markdown`);
 }
 
 function exportSelectedChapterTxt() {
@@ -2248,7 +2682,9 @@ function openFullBookImportPanel() {
   $("#importExportOverview").hidden = true;
   $("#txtImportPanel").hidden = true;
   $("#fullBookImportPanel").hidden = false;
+  $("#markdownImportPanel").hidden = true;
   $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
   $("#backToImportExportButton").hidden = false;
 }
 
@@ -3394,6 +3830,8 @@ function bindEvents() {
   $("#openTxtImportFromTransfer").addEventListener("click", openTxtImportPanel);
   $("#openFullBookImportFromTransfer").addEventListener("click", openFullBookImportPanel);
   $("#openChapterTxtExportButton").addEventListener("click", openChapterTxtExportPanel);
+  $("#openMarkdownImportButton").addEventListener("click", openMarkdownImportPanel);
+  $("#openChapterMarkdownExportButton").addEventListener("click", openChapterMarkdownExportPanel);
   $("#chapterTxtExportList").addEventListener("change", event => {
     const volumeCheckbox = event.target.closest("[data-export-volume]");
     if (volumeCheckbox) {
@@ -3418,6 +3856,31 @@ function bindEvents() {
     renderChapterTxtExportList();
   });
   $("#confirmChapterTxtExportButton").addEventListener("click", exportSelectedChapterTxt);
+  $("#chapterMarkdownExportList").addEventListener("change", event => {
+    const volumeCheckbox = event.target.closest("[data-markdown-export-volume]");
+    if (volumeCheckbox) {
+      const volumeId = volumeCheckbox.dataset.markdownExportVolume;
+      state.project.chapters.filter(chapter => chapter.volume_id === volumeId).forEach(chapter => {
+        if (volumeCheckbox.checked) state.selectedMarkdownExportChapterIds.add(chapter.id);
+        else state.selectedMarkdownExportChapterIds.delete(chapter.id);
+      });
+      renderChapterMarkdownExportList();
+      return;
+    }
+    const chapterCheckbox = event.target.closest("[data-markdown-export-chapter]");
+    if (!chapterCheckbox) return;
+    if (chapterCheckbox.checked) state.selectedMarkdownExportChapterIds.add(chapterCheckbox.dataset.markdownExportChapter);
+    else state.selectedMarkdownExportChapterIds.delete(chapterCheckbox.dataset.markdownExportChapter);
+    renderChapterMarkdownExportList();
+  });
+  $("#selectAllMarkdownExportChapters").addEventListener("change", event => {
+    state.selectedMarkdownExportChapterIds = event.currentTarget.checked
+      ? new Set(state.project.chapters.map(chapter => chapter.id))
+      : new Set();
+    renderChapterMarkdownExportList();
+  });
+  $("#confirmChapterMarkdownExportButton").addEventListener("click", exportSelectedChapterMarkdown);
+  $("#backFromChapterMarkdownExportButton").addEventListener("click", showImportExportOverview);
   $("#backFromChapterTxtExportButton").addEventListener("click", showImportExportOverview);
   $("#exportBookTxtButton").addEventListener("click", exportBookTxt);
   $("#backToImportExportButton").addEventListener("click", showImportExportOverview);
@@ -3451,15 +3914,33 @@ function bindEvents() {
   $("#confirmFullBookImportButton").addEventListener("click", importFullBookTxt);
   $("#fullBookImportVolume").addEventListener("change", () => renderFullBookImportPreview());
   $("#backFromFullBookImportButton").addEventListener("click", showImportExportOverview);
+  $("#markdownImportFiles").addEventListener("change", event => selectMarkdownImportFiles(event.currentTarget.files));
+  $("#markdownImportVolume").addEventListener("change", () => renderMarkdownImportSummary());
+  $("#markdownImportMode").addEventListener("change", () => renderMarkdownImportSummary());
+  $("#markdownImportFileList").addEventListener("change", event => {
+    const target = event.target.closest("[data-markdown-target]");
+    if (!target) return;
+    const file = state.pendingMarkdownFiles[Number(target.dataset.markdownTarget)];
+    if (file) file.targetChapterId = target.value;
+    renderMarkdownImportSummary();
+  });
+  $("#confirmMarkdownImportButton").addEventListener("click", importMarkdownFiles);
+  $("#backFromMarkdownImportButton").addEventListener("click", showImportExportOverview);
   $("#importExportDialog").addEventListener("close", () => {
     state.pendingTxtFiles = [];
     state.pendingFullBookFile = null;
     state.pendingFullBookChapters = [];
+    state.pendingMarkdownFiles = [];
+    state.pendingMarkdownIsZip = false;
+    state.markdownImportBusy = false;
     state.selectedTxtExportChapterIds.clear();
+    state.selectedMarkdownExportChapterIds.clear();
     $("#importTxtFiles").value = "";
     $("#fullBookImportFile").value = "";
+    $("#markdownImportFiles").value = "";
     renderTxtImportFileSummary();
     renderFullBookImportPreview();
+    renderMarkdownImportSummary();
     showImportExportOverview();
   });
   $("#addVolumeButton").addEventListener("click", openNewVolumeDialog);

@@ -575,6 +575,12 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .txt-import-file-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 9px; border-radius: 7px; color: #415875; background: #f3f7fd; font-size: 11px; }
 .txt-import-file-list li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .txt-import-file-list li span:last-child { flex: 0 0 auto; color: #8192a9; }
+.markdown-import-entry { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(180px, 42%); align-items: center; gap: 8px 12px !important; }
+.markdown-import-entry-details { display: grid; min-width: 0; gap: 3px; }
+.markdown-import-entry-details > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.markdown-import-entry-details small, .markdown-import-chapter-title { overflow: hidden; color: #8192a9; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.markdown-import-entry select { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: #415875; background: white; font-size: 11px; }
+.markdown-import-chapter-title { grid-column: 1 / -1; }
 .chapter-export-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 9px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; color: #526783; background: #f8fbff; font-size: 12px; }
 .chapter-export-selection-toolbar label { display: flex; align-items: center; gap: 7px; margin: 0; cursor: pointer; }
 .chapter-export-selection-toolbar input, .chapter-txt-export-item input, .chapter-txt-export-volume-heading input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }

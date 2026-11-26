@@ -1,13 +1,17 @@
+import io
 import os
+import re
 import secrets
 import sqlite3
+import zipfile
+import zlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Literal, Optional
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -307,6 +311,28 @@ class TextChapterImport(BaseModel):
     files: List[TextChapterImportItem] = Field(min_length=1, max_length=50)
 
 
+class MarkdownChapterImportItem(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(default="", max_length=2_000_000)
+    target_chapter_id: Optional[str] = None
+
+
+class MarkdownChapterImport(BaseModel):
+    volume_id: Optional[str] = None
+    mode: Literal["new", "replace"] = "new"
+    files: List[MarkdownChapterImportItem] = Field(min_length=1, max_length=50)
+
+
+class MarkdownChapterExportItem(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    volume_title: str = Field(default="未分类", max_length=120)
+    content: str = Field(default="", max_length=50_000_000)
+
+
+class MarkdownChapterExport(BaseModel):
+    files: List[MarkdownChapterExportItem] = Field(min_length=1, max_length=1000)
+
+
 class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=120)
     content: Optional[str] = None
@@ -384,7 +410,7 @@ class EdgeUpdate(BaseModel):
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.11.0",
+    version="0.12.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -402,7 +428,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.11.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.12.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -711,6 +737,150 @@ def import_text_chapters(project_id: str, payload: TextChapterImport):
             imported.append(dict(row))
         connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
     return {"chapters": imported}
+
+
+def safe_archive_component(value: str) -> str:
+    component = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).strip(" .")
+    if not component:
+        component = "未命名"
+    if re.fullmatch(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", component, re.IGNORECASE):
+        component = f"_{component}"
+    return component[:120]
+
+
+def read_markdown_archive(archive_bytes: bytes) -> List[dict]:
+    if len(archive_bytes) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="ZIP 文件不能超过 12 MB")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            entries = sorted(
+                (entry for entry in archive.infolist()
+                if not entry.is_dir() and entry.filename.lower().endswith((".md", ".markdown"))),
+                key=lambda entry: entry.filename.casefold(),
+            )
+            if not entries:
+                raise HTTPException(status_code=400, detail="ZIP 压缩包中没有 .md 文件")
+            if len(entries) > 50:
+                raise HTTPException(status_code=413, detail="ZIP 中一次最多导入 50 个 Markdown 文件")
+            if any(entry.file_size > 6 * 1024 * 1024 for entry in entries):
+                raise HTTPException(status_code=413, detail="ZIP 中单个 Markdown 文件不能超过 6 MB")
+            if sum(entry.file_size for entry in entries) > 12 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="ZIP 中 Markdown 文件总大小不能超过 12 MB")
+            files = []
+            for entry in entries:
+                if entry.flag_bits & 0x1:
+                    raise HTTPException(status_code=400, detail="ZIP 中的 Markdown 文件不能加密")
+                name = entry.filename.replace("\\", "/").rstrip("/").split("/")[-1]
+                title = Path(name).stem.strip()[:120] or "未命名章节"
+                try:
+                    content = archive.read(entry).decode("utf-8-sig")
+                except (UnicodeDecodeError, RuntimeError, NotImplementedError, OSError, zlib.error) as error:
+                    raise HTTPException(status_code=400, detail=f"无法读取“{name}”：请使用 UTF-8 编码且不要加密") from error
+                files.append({"title": title, "content": content, "name": name, "size": entry.file_size})
+    except zipfile.BadZipFile as error:
+        raise HTTPException(status_code=400, detail="无法读取 ZIP 文件，请确认压缩包有效") from error
+    return files
+
+
+@app.post("/api/projects/{project_id}/chapters/parse-markdown-zip", dependencies=[Depends(authorize)])
+async def parse_markdown_zip(project_id: str, request: Request):
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not project:
+        raise HTTPException(status_code=404, detail="作品不存在")
+    archive_bytes = bytearray()
+    async for chunk in request.stream():
+        archive_bytes.extend(chunk)
+        if len(archive_bytes) > 12 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="ZIP 文件不能超过 12 MB")
+    return {"files": read_markdown_archive(bytes(archive_bytes))}
+
+
+@app.post("/api/projects/{project_id}/chapters/import-markdown", status_code=201, dependencies=[Depends(authorize)])
+def import_markdown_chapters(project_id: str, payload: MarkdownChapterImport):
+    total_characters = sum(len(item.content) for item in payload.files)
+    if total_characters > 10_000_000:
+        raise HTTPException(status_code=413, detail="Markdown 文件总内容过大，请分批导入（总计不超过 1000 万字）")
+    if payload.mode == "replace":
+        target_ids = [item.target_chapter_id for item in payload.files]
+        if any(not chapter_id for chapter_id in target_ids) or len(set(target_ids)) != len(target_ids):
+            raise HTTPException(status_code=400, detail="替换模式下，每个 Markdown 文件必须指定不同的目标章节")
+    timestamp = now()
+    imported = []
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        volume = None
+        if payload.mode == "new":
+            if not payload.volume_id:
+                raise HTTPException(status_code=400, detail="新建章节时必须选择故事卷")
+            volume = connection.execute(
+                "SELECT id FROM volumes WHERE id = ? AND project_id = ?", (payload.volume_id, project_id)
+            ).fetchone()
+            if not volume:
+                raise HTTPException(status_code=400, detail="故事卷不存在或不属于当前作品")
+        if payload.mode == "replace":
+            targets = []
+            for item in payload.files:
+                target = connection.execute(
+                    "SELECT * FROM chapters WHERE id = ? AND project_id = ?",
+                    (item.target_chapter_id, project_id),
+                ).fetchone()
+                if not target:
+                    raise HTTPException(status_code=400, detail="目标章节不存在或不属于当前作品")
+                targets.append(target)
+            for target, item in zip(targets, payload.files):
+                connection.execute(
+                    "UPDATE chapters SET content = ?, updated_at = ? WHERE id = ?",
+                    (item.content, timestamp, target["id"]),
+                )
+                row = connection.execute("SELECT * FROM chapters WHERE id = ?", (target["id"],)).fetchone()
+                imported.append(dict(row))
+        else:
+            position = connection.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM chapters WHERE volume_id = ?",
+                (payload.volume_id,),
+            ).fetchone()["position"]
+            for offset, item in enumerate(payload.files):
+                chapter_id = new_id("chapter")
+                connection.execute(
+                    """INSERT INTO chapters(id, project_id, volume_id, title, content, position, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (chapter_id, project_id, payload.volume_id, item.title, item.content,
+                     position + offset, timestamp, timestamp),
+                )
+                row = connection.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+                imported.append(dict(row))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
+    return {"chapters": imported, "mode": payload.mode}
+
+
+@app.post("/api/projects/{project_id}/chapters/export-markdown-zip", dependencies=[Depends(authorize)])
+def export_markdown_zip(project_id: str, payload: MarkdownChapterExport):
+    total_characters = sum(len(item.content) for item in payload.files)
+    if total_characters > 50_000_000:
+        raise HTTPException(status_code=413, detail="Markdown ZIP 内容过大，请分批导出")
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not project:
+        raise HTTPException(status_code=404, detail="作品不存在")
+    archive_buffer = io.BytesIO()
+    used_paths = set()
+    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in payload.files:
+            volume = safe_archive_component(item.volume_title)
+            title = safe_archive_component(item.title)
+            base_path = f"{volume}/{title}"
+            path = f"{base_path}.md"
+            duplicate = 2
+            while path.casefold() in used_paths:
+                path = f"{base_path} ({duplicate}).md"
+                duplicate += 1
+            used_paths.add(path.casefold())
+            body = item.content or ""
+            archive.writestr(path, f"# {item.title}\n\n{body}" if body else f"# {item.title}\n")
+    return Response(content=archive_buffer.getvalue(), media_type="application/zip")
 
 
 @app.patch("/api/chapters/{chapter_id}", dependencies=[Depends(authorize)])

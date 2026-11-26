@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v63-txt-guide-alignment";
+const CACHE = "motu-shell-v64-markdown-transfer";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));
