@@ -1,4 +1,4 @@
-const CACHE = "motu-shell-v62-select-chapter-export";
+const CACHE = "motu-shell-v63-txt-guide-alignment";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL))));

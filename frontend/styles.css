@@ -186,9 +186,11 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .linked-node-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .manuscript { min-height: calc(100dvh - 390px); overflow-wrap: anywhere; border: 0; outline: 0; padding: 38px 0; color: var(--writing-color,#292b39); background: transparent; font-family: var(--writing-font,"Noto Serif SC","Songti SC",serif); font-size: var(--writing-size,18px); font-weight: var(--writing-weight,400); line-height: var(--writing-line-height,2.05); letter-spacing: .04em; caret-color: var(--accent); }
 .manuscript:empty::before { content: attr(data-placeholder); color: #a8abb4; pointer-events: none; }
+.write-view.guide-solid .manuscript, .write-view.guide-dashed .manuscript { --writing-line-step: calc(var(--writing-size,18px) * var(--writing-line-height,2.05)); line-height: var(--writing-line-height,2.05); }
 .write-view.guide-solid .manuscript { background-image: linear-gradient(to bottom,transparent calc(100% - 1px),rgba(117,128,143,.34) 0); background-size: 100% var(--writing-line-step,36.9px); background-position: 0 38px; }
 .write-view.guide-dashed .manuscript { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='100' viewBox='0 0 12 100' preserveAspectRatio='none'%3E%3Cpath d='M0 99.5H7' stroke='%23aeb5bf' stroke-width='1' vector-effect='non-scaling-stroke' shape-rendering='crispEdges'/%3E%3C/svg%3E"); background-size: 12px var(--writing-line-step,36.9px); background-position: 0 38px; }
 .manuscript p { margin: 0 0 1.15em; }
+.write-view.guide-solid .manuscript p, .write-view.guide-dashed .manuscript p { margin-bottom: var(--writing-line-step); }
 .write-view.compact-paragraphs .manuscript p { margin-bottom: 0; }
 .write-view.first-line-indent .manuscript p { text-indent: 2em; }
 .split-pane { grid-column: 2; grid-row: 2; min-width: 0; overflow: auto; border-left: 1px solid #d6deea; color: var(--ink); background: rgba(250,252,255,.98); box-shadow: -12px 0 30px rgba(36,62,103,.07); z-index: 8; }
@@ -820,6 +822,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
   .paper { min-height: 100%; padding: 42px 24px 100px; }
   .chapter-title-input { font-size: 28px; }
   .manuscript { min-height: 640px; font-size: 17px; line-height: 1.95; }
+  .write-view.guide-solid .manuscript, .write-view.guide-dashed .manuscript { --writing-line-step: calc(17px * 1.95); }
   .shortcut-panel { top: 112px; right: 10px; width: calc(100vw - 20px); max-height: calc(100dvh - 182px); }
   .shortcut-groups { max-height: calc(100dvh - 328px); }
   .typography-panel { top: 112px; left: 10px; width: calc(100vw - 20px); max-height: calc(100dvh - 182px); overflow: auto; }

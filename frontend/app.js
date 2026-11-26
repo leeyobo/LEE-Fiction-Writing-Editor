@@ -219,6 +219,20 @@ function markdownToReadableText(markdown = "") {
     .trim();
 }
 
+function plainTextToMarkdown(text = "") {
+  return String(text || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .split(/\n(?:[\t ]*\n)+/)
+    .map(paragraph => paragraph
+      .split("\n")
+      .map(line => line.replace(/[\t ]+$/g, ""))
+      .join("  \n")
+      .replace(/^\n+|\n+$/g, ""))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function stripRepeatedExportTitle(content, filename) {
   const lines = String(content || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
   const fileTitle = String(filename || "").replace(/\.txt$/i, "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
@@ -388,8 +402,20 @@ function markdownToEditorHtml(markdown = "") {
       output.push(`<table><thead><tr>${headers.map(cell => `<th>${inlineMarkdownToHtml(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${inlineMarkdownToHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
       continue;
     }
-    output.push(`<p>${inlineMarkdownToHtml(line)}</p>`);
-    index += 1;
+    const paragraphLines = [];
+    while (index < lines.length && lines[index].trim()) {
+      const currentLine = lines[index];
+      const startsBlock = /^(?:\s{0,3}#{1,6}\s+|>\s?|[-+*]\s+|\d+\.\s+|```|\$\$\s*$)/.test(currentLine)
+        || (currentLine.includes("|") && index + 1 < lines.length && /^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$/.test(lines[index + 1]));
+      if (paragraphLines.length && startsBlock) break;
+      paragraphLines.push(currentLine);
+      index += 1;
+    }
+    const paragraphHtml = paragraphLines.map((paragraphLine, lineIndex) => {
+      const inline = inlineMarkdownToHtml(paragraphLine.replace(/[\t ]+$/g, ""));
+      return inline + (lineIndex < paragraphLines.length - 1 ? "<br>" : "");
+    }).join("");
+    output.push(`<p>${paragraphHtml}</p>`);
   }
   return output.join("");
 }
@@ -2147,7 +2173,7 @@ async function importTxtFiles() {
       } catch (_) {
         throw new Error(`“${file.name}”无法按 ${encoding.toUpperCase()} 解码，请检查文件编码后重试`);
       }
-      return { file, content: stripRepeatedExportTitle(content, file.name) };
+      return { file, content: plainTextToMarkdown(stripRepeatedExportTitle(content, file.name)) };
     }));
     if (decodedFiles.some(item => item.content.length > 2_000_000)) {
       throw new Error("单个 TXT 正文不能超过 200 万字符，请拆分文件后重试");
@@ -2275,7 +2301,7 @@ async function selectFullBookImportFile(file) {
       volumeNames: state.project.volumes.map(volume => volume.title),
     }).map((chapter, index) => ({
       title: chapter.title || `第 ${index + 1} 章`,
-      content: chapter.content,
+      content: plainTextToMarkdown(chapter.content),
     }));
     if (state.pendingFullBookChapters.length > 50) {
       state.pendingFullBookChapters = [];
