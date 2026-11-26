@@ -4438,6 +4438,9 @@ function bindEvents() {
   });
   $("#confirmMarkdownImportButton").addEventListener("click", importMarkdownFiles);
   $("#backFromMarkdownImportButton").addEventListener("click", showImportExportOverview);
+  $("#importExportDialog").addEventListener("click", event => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+  });
   $("#importExportDialog").addEventListener("close", () => {
     state.pendingTxtFiles = [];
     state.pendingFullBookFile = null;

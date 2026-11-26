@@ -545,6 +545,9 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .transfer-heading-actions { display: flex; align-items: center; gap: 8px; }
 .transfer-back-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: #526783; background: white; cursor: pointer; font-size: 12px; }
 .transfer-back-button:hover { border-color: #9bbaf0; color: #1d4ed8; background: #eef4ff; }
+.transfer-heading-actions .transfer-close-button { display: grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; padding: 0 0 2px; border: 1px solid var(--line); border-radius: 10px; color: #526783; background: #f7faff; font: 500 21px/1 Arial, sans-serif; cursor: pointer; transition: border-color .16s ease, color .16s ease, background-color .16s ease, transform .16s ease; }
+.transfer-heading-actions .transfer-close-button:hover { transform: rotate(4deg); border-color: #9bbaf0; color: #1d4ed8; background: #eef4ff; }
+.transfer-heading-actions .transfer-close-button:focus-visible { outline: 3px solid rgba(37,99,235,.28); outline-offset: 2px; }
 .transfer-modal .modal-copy { margin: -4px 0 16px; }
 .transfer-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .transfer-group { min-width: 0; padding: 14px; border: 1px solid #d9d991; border-radius: 3px; background: #fffde0; }
@@ -562,7 +565,10 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .transfer-action-available:hover { border-color: #7da4e2; background: #f5f9ff; }
 .transfer-action-available small { color: #1d4ed8; background: #e8f1ff; }
 .txt-import-panel .modal-copy { margin-top: 0; }
-.transfer-modal .txt-file-picker input[type="file"] { padding: 9px; border-style: dashed; background: #f8fbff; font-size: 12px; cursor: pointer; }
+.transfer-modal .txt-file-picker input[type="file"] { padding: 8px; border: 1px dashed #b8cce8; border-radius: 10px; color: #657894; background: #f8fbff; font-size: 12px; cursor: pointer; }
+.transfer-modal .txt-file-picker input[type="file"]::file-selector-button { margin-right: 11px; padding: 8px 13px; border: 1px solid #c6d8f2; border-radius: 7px; color: #2457a6; background: #edf4ff; font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.2; cursor: pointer; transition: border-color .16s ease, color .16s ease, background-color .16s ease; }
+.transfer-modal .txt-file-picker input[type="file"]::file-selector-button:hover { border-color: #9bbaf0; color: #1d4ed8; background: #e3eeff; }
+.transfer-modal .txt-file-picker input[type="file"]:focus-visible { outline: 3px solid rgba(37,99,235,.22); outline-offset: 2px; }
 .transfer-modal .modal-actions { margin-top: 3px; }
 .transfer-modal .modal-actions .secondary-button { color: #526783; }
 .transfer-modal .modal-actions .wide-button { border: 0; color: white; background: var(--accent); }
@@ -675,6 +681,8 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .project-transfer-button { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
 .night-mode .add-volume-button, .night-mode .volume-actions button { color: #a8c9f6; border-color: #3b506f; background: #1e2a3e; }
 .night-mode .transfer-back-button { color: #c4d2e5; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .transfer-heading-actions .transfer-close-button { color: #c4d2e5; border-color: #3b506f; background: #1e2a3e; }
+.night-mode .transfer-heading-actions .transfer-close-button:hover { color: #bfdbfe; border-color: #5275a8; background: #263d5e; }
 .night-mode .transfer-group { border-color: #5a5b3e; background: #292a21; }
 .night-mode .transfer-group h3 { color: #e2e8f0; }
 .night-mode .transfer-group > p { color: #a9bad1; }
@@ -684,7 +692,9 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .night-mode .transfer-action-available { border-color: #5275a8; }
 .night-mode .transfer-action-available:hover { background: #22334c; }
 .night-mode .transfer-action-available small { color: #bfdbfe; background: #263d5e; }
-.night-mode .transfer-modal .txt-file-picker input[type="file"] { background: #111b2a; }
+.night-mode .transfer-modal .txt-file-picker input[type="file"] { color: #a9bad1; border-color: #3b506f; background: #111b2a; }
+.night-mode .transfer-modal .txt-file-picker input[type="file"]::file-selector-button { color: #bfdbfe; border-color: #3b506f; background: #26374e; }
+.night-mode .transfer-modal .txt-file-picker input[type="file"]::file-selector-button:hover { color: #dbeafe; border-color: #5275a8; background: #304663; }
 .night-mode .chapter-export-selection-toolbar { color: #c4d2e5; border-color: #3b506f; background: #1a283a; }
 .night-mode .chapter-txt-export-volume { border-color: #3b506f; background: #1e2a3e; }
 .night-mode .chapter-txt-export-volume-heading { color: #c4d2e5; background: #26374e; }
