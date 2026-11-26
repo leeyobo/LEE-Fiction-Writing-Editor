@@ -326,7 +326,7 @@ function safeTxtFilename(title) {
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .replace(/[. ]+$/g, "")
     .slice(0, 100);
-  if (!stem) stem = "墨图导出";
+  if (!stem) stem = "leeroboer-export";
   if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
   return `${stem}.txt`;
 }
@@ -337,7 +337,7 @@ function safeMarkdownFilename(title) {
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .replace(/[. ]+$/g, "")
     .slice(0, 100);
-  if (!stem) stem = "墨图导出";
+  if (!stem) stem = "leeroboer-export";
   if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
   return `${stem}.md`;
 }
@@ -2084,12 +2084,12 @@ function showImportExportOverview() {
 }
 
 function safeProjectFilename(title) {
-  let stem = String(title || "墨图作品").trim()
+  let stem = String(title || "leeroboer-project").trim()
     .replace(/\.(?:leeproj|json)$/i, "")
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .replace(/[. ]+$/g, "")
     .slice(0, 100);
-  if (!stem) stem = "墨图作品";
+  if (!stem) stem = "leeroboer-project";
   if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
   return `${stem}.leeproj`;
 }
@@ -2150,7 +2150,7 @@ async function selectProjectPackageFile(file) {
     if (!data || data.format !== "lee-project" || data.version !== 1 || typeof data.title !== "string"
       || typeof data.description !== "string" || !Array.isArray(data.volumes) || !Array.isArray(data.chapters)
       || !Array.isArray(data.maps) || !Array.isArray(data.nodes) || !Array.isArray(data.edges) || !Array.isArray(data.notes)) {
-      throw new Error("文件格式不受支持，请选择墨图导出的完整作品包");
+      throw new Error("文件格式不受支持，请选择 leeroboer 导出的完整作品包");
     }
     if (!data.volumes.length || !data.maps.length || data.volumes.length > 500 || data.chapters.length > 10000
       || data.maps.length > 100 || data.nodes.length > 50000 || data.edges.length > 100000 || data.notes.length > 100000) {
@@ -2366,7 +2366,7 @@ async function selectStoryMapPackageFile(file) {
     const data = JSON.parse(text);
     if (!data || data.format !== "lee-story-map" || data.version !== 1 || typeof data.title !== "string"
       || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
-      throw new Error("文件格式不受支持，请选择墨图导出的 .leemap 地图包");
+      throw new Error("文件格式不受支持，请选择 leeroboer 导出的 .leemap 地图包");
     }
     if (data.nodes.some(node => !node || typeof node !== "object" || typeof node.key !== "string" || typeof node.label !== "string")
       || data.edges.some(edge => !edge || typeof edge !== "object" || typeof edge.source_key !== "string" || typeof edge.target_key !== "string")) {

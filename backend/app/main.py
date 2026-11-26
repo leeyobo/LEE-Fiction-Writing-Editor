@@ -526,7 +526,7 @@ class ProjectPackage(BaseModel):
 
 
 app = FastAPI(
-    title="墨图小说编辑器 API",
+    title="leeroboer Writing Studio API",
     description="章节、故事地图节点和关系的自托管 API",
     version="0.16.0",
 )

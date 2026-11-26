@@ -61,7 +61,7 @@ def main() -> int:
             str(ROOT / "frontend"),
         ])
     processes = [subprocess.Popen(command, cwd=str(ROOT)) for command in commands]
-    print("\n墨图开发环境已启动：")
+    print("\nleeroboer 开发环境已启动：")
     print("  前端  http://127.0.0.1:4173")
     if reuse_frontend:
         print("        （检测到已有前端服务，继续复用）")
