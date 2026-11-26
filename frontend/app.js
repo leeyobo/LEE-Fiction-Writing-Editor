@@ -1,6 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const REQUIRED_API_VERSION = "0.12.0";
+const REQUIRED_API_VERSION = "0.15.0";
 
 const state = {
   config: {
@@ -35,6 +35,10 @@ const state = {
   pendingMarkdownIsZip: false,
   selectedTxtExportChapterIds: new Set(),
   selectedMarkdownExportChapterIds: new Set(),
+  selectedStoryMapExportIds: new Set(),
+  storyMapExportBusy: false,
+  pendingStoryMapPackage: null,
+  storyMapImportBusy: false,
   pendingVolumeDeleteId: null,
   collapsedVolumeIds: new Set(),
   storyMapsCollapsed: false,
@@ -1989,7 +1993,254 @@ function showImportExportOverview() {
   $("#markdownImportPanel").hidden = true;
   $("#chapterTxtExportPanel").hidden = true;
   $("#chapterMarkdownExportPanel").hidden = true;
+  $("#storyMapExportPanel").hidden = true;
+  $("#storyMapImportPanel").hidden = true;
   $("#backToImportExportButton").hidden = true;
+}
+
+function safeStoryMapFilename(title) {
+  let stem = String(title || "故事地图").trim()
+    .replace(/\.(?:leemap|json)$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 100);
+  if (!stem) stem = "故事地图";
+  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
+  return `${stem}.leemap`;
+}
+
+function openStoryMapPackageExportPanel() {
+  if (!requireProject("导出故事地图")) return;
+  state.selectedStoryMapExportIds = new Set();
+  state.storyMapExportBusy = false;
+  renderStoryMapPackageExportList();
+  $("#importExportDialogTitle").textContent = "导出故事地图";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
+  $("#storyMapExportPanel").hidden = false;
+  $("#storyMapImportPanel").hidden = true;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function renderStoryMapPackageExportList() {
+  const maps = state.project?.maps || [];
+  const selectedIds = state.selectedStoryMapExportIds;
+  const list = $("#storyMapExportList");
+  const selectAll = $("#selectAllStoryMapExports");
+  const summary = $("#storyMapExportSummary");
+  const button = $("#confirmStoryMapExportButton");
+  list.replaceChildren(...maps.map(storyMap => {
+    const label = document.createElement("label");
+    label.className = "chapter-txt-export-item";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.exportStoryMap = storyMap.id;
+    checkbox.checked = selectedIds.has(storyMap.id);
+    const title = document.createElement("span");
+    title.textContent = storyMap.title;
+    label.append(checkbox, title);
+    return label;
+  }));
+  const selectedCount = selectedIds.size;
+  summary.textContent = `已选择 ${selectedCount} 张地图`;
+  selectAll.checked = maps.length > 0 && selectedCount === maps.length;
+  selectAll.indeterminate = selectedCount > 0 && selectedCount < maps.length;
+  button.disabled = selectedCount === 0 || state.storyMapExportBusy;
+  button.textContent = selectedCount > 1 ? `打包导出所选地图（${selectedCount}）` : "导出所选地图";
+}
+
+async function exportSelectedStoryMapPackages() {
+  if (!requireProject("导出故事地图")) return;
+  const selected = (state.project?.maps || []).filter(storyMap => state.selectedStoryMapExportIds.has(storyMap.id));
+  if (!selected.length) { toast("请先选择要导出的故事地图"); return; }
+  const button = $("#confirmStoryMapExportButton");
+  state.storyMapExportBusy = true;
+  renderStoryMapPackageExportList();
+  button.textContent = selected.length > 1 ? "正在打包 ZIP…" : "正在导出地图…";
+  try {
+    if (selected.length === 1) {
+      const storyMap = selected[0];
+      const data = await api(`/api/projects/${state.project.id}/maps/${storyMap.id}/package`);
+      const blob = new Blob([`${JSON.stringify(data, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+      downloadBlob(safeStoryMapFilename(storyMap.title), blob);
+      toast(`已导出地图“${storyMap.title}”`);
+    } else {
+      const blob = await apiBlob(`/api/projects/${state.project.id}/maps/export-zip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ map_ids: selected.map(storyMap => storyMap.id) }),
+      });
+      const filename = safeStoryMapFilename(`${state.project.title}-所选地图`).replace(/\.leemap$/i, ".zip");
+      downloadBlob(filename, blob);
+      toast(`已打包导出 ${selected.length} 张故事地图`);
+    }
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    state.storyMapExportBusy = false;
+    renderStoryMapPackageExportList();
+  }
+}
+
+function openStoryMapPackageImportPanel() {
+  if (!requireProject("导入故事地图")) return;
+  state.pendingStoryMapPackage = null;
+  state.storyMapImportBusy = false;
+  $("#storyMapImportMode").value = "new";
+  $("#storyMapPackageFile").value = "";
+  $("#storyMapImportTitle").value = "";
+  renderStoryMapReplacementTargets();
+  updateStoryMapImportMode();
+  renderStoryMapImportSummary();
+  $("#importExportDialogTitle").textContent = "导入故事地图";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#markdownImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = true;
+  $("#chapterMarkdownExportPanel").hidden = true;
+  $("#storyMapExportPanel").hidden = true;
+  $("#storyMapImportPanel").hidden = false;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function renderStoryMapReplacementTargets() {
+  const select = $("#storyMapReplacementTarget");
+  const maps = state.project?.maps || [];
+  select.replaceChildren(...maps.map(storyMap => {
+    const option = document.createElement("option");
+    option.value = storyMap.id;
+    option.textContent = storyMap.title;
+    return option;
+  }));
+  if (maps.some(storyMap => storyMap.id === state.activeMapId)) {
+    select.value = state.activeMapId;
+  }
+}
+
+function updateStoryMapImportMode() {
+  const replacing = $("#storyMapImportMode").value === "replace";
+  $("#storyMapReplacementTargetField").hidden = !replacing;
+  $("#storyMapImportTitleField").hidden = replacing;
+  $("#confirmStoryMapImportButton").textContent = state.storyMapImportBusy
+    ? "正在处理地图…"
+    : replacing ? "替换所选地图" : "导入为新地图";
+  renderStoryMapImportSummary();
+}
+
+async function selectStoryMapPackageFile(file) {
+  state.pendingStoryMapPackage = null;
+  if (!file) { renderStoryMapImportSummary(); return; }
+  if (!/\.(?:leemap|json)$/i.test(file.name)) {
+    renderStoryMapImportSummary("请选择 .leemap 或 JSON 地图数据包");
+    return;
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    renderStoryMapImportSummary("故事地图数据包不能超过 15 MB");
+    return;
+  }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()).replace(/^\uFEFF/, "");
+    const data = JSON.parse(text);
+    if (!data || data.format !== "lee-story-map" || data.version !== 1 || typeof data.title !== "string"
+      || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+      throw new Error("文件格式不受支持，请选择墨图导出的 .leemap 地图包");
+    }
+    if (data.nodes.some(node => !node || typeof node !== "object" || typeof node.key !== "string" || typeof node.label !== "string")
+      || data.edges.some(edge => !edge || typeof edge !== "object" || typeof edge.source_key !== "string" || typeof edge.target_key !== "string")) {
+      throw new Error("地图数据包的节点或连线结构不完整");
+    }
+    if (data.nodes.length > 5000 || data.edges.length > 10000) {
+      throw new Error("地图数据包内容过多，节点上限 5000，连线上限 10000");
+    }
+    state.pendingStoryMapPackage = data;
+    $("#storyMapImportTitle").value = data.title.slice(0, 120);
+    renderStoryMapImportSummary();
+  } catch (error) {
+    renderStoryMapImportSummary(error instanceof SyntaxError ? "无法解析该文件：请检查 JSON 格式" : error.message);
+  }
+}
+
+function renderStoryMapImportSummary(error = "") {
+  const summary = $("#storyMapImportSummary");
+  const button = $("#confirmStoryMapImportButton");
+  const data = state.pendingStoryMapPackage;
+  const title = $("#storyMapImportTitle").value.trim();
+  const replacing = $("#storyMapImportMode").value === "replace";
+  const targetMapId = $("#storyMapReplacementTarget").value;
+  const invalidKeys = data && new Set(data.nodes.map(node => node.key)).size !== data.nodes.length;
+  const linksValid = data && data.edges.every(edge => data.nodes.some(node => node.key === edge.source_key)
+    && data.nodes.some(node => node.key === edge.target_key));
+  const validationError = error || (data && !replacing && !title ? "请输入导入后地图名称" : "")
+    || (invalidKeys ? "地图数据包中包含重复节点标识" : "")
+    || (data && replacing && !targetMapId ? "请选择要替换的现有地图" : "")
+    || (data && !linksValid ? "地图数据包中的连线引用了不存在的节点" : "");
+  summary.classList.toggle("error", Boolean(validationError));
+  summary.textContent = validationError || (data
+    ? `已读取“${data.title}” · ${data.nodes.length} 个节点 · ${data.edges.length} 条连线 · ${data.nodes.reduce((total, node) => total + (node.notes?.length || 0), 0)} 条便签`
+    : "尚未选择数据包");
+  button.disabled = !data || Boolean(validationError) || state.storyMapImportBusy;
+  button.textContent = state.storyMapImportBusy
+    ? replacing ? "正在替换地图…" : "正在创建地图…"
+    : replacing ? "替换所选地图" : "导入为新地图";
+}
+
+async function importStoryMapPackage() {
+  const data = state.pendingStoryMapPackage;
+  if (!state.project || !data) return;
+  const replacing = $("#storyMapImportMode").value === "replace";
+  const targetMapId = $("#storyMapReplacementTarget").value;
+  const title = $("#storyMapImportTitle").value.trim();
+  if (replacing && !targetMapId) { toast("请选择要替换的现有地图"); return; }
+  if (!replacing && !title) { toast("请输入导入后地图名称"); return; }
+  const targetMap = state.project.maps.find(storyMap => storyMap.id === targetMapId);
+  if (replacing && !window.confirm(`替换“${targetMap?.title || "所选地图"}”会移除该地图当前的节点、连线和便签，并导入数据包内容。此操作无法撤销，是否继续？`)) return;
+  const button = $("#confirmStoryMapImportButton");
+  state.storyMapImportBusy = true;
+  renderStoryMapImportSummary();
+  button.textContent = replacing ? "正在替换地图…" : "正在创建地图…";
+  try {
+    const endpoint = replacing
+      ? `/api/projects/${state.project.id}/maps/${targetMapId}/import`
+      : `/api/projects/${state.project.id}/maps/import`;
+    const result = await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ ...data, title: replacing ? data.title : title }),
+    });
+    if (replacing) {
+      const oldNodeIds = new Set(state.project.nodes.filter(node => node.map_id === result.map.id).map(node => node.id));
+      state.project.nodes = state.project.nodes.filter(node => node.map_id !== result.map.id).concat(result.nodes);
+      state.project.edges = state.project.edges.filter(edge => edge.map_id !== result.map.id).concat(result.edges);
+      state.project.notes = state.project.notes.filter(note => !oldNodeIds.has(note.node_id)).concat(result.notes);
+      const mapIndex = state.project.maps.findIndex(storyMap => storyMap.id === result.map.id);
+      if (mapIndex >= 0) state.project.maps[mapIndex] = result.map;
+      state.selectedNodeId = null;
+      state.selectedNodeIds.clear();
+      state.selectedEdgeId = null;
+      state.selectedEdgeIds.clear();
+    } else {
+      state.project.maps.push(result.map);
+      state.project.nodes.push(...result.nodes);
+      state.project.edges.push(...result.edges);
+      state.project.notes.push(...result.notes);
+    }
+    $("#importExportDialog").close();
+    selectStoryMap(result.map.id);
+    const unresolved = result.chapter_links.unresolved;
+    const action = replacing ? "地图已替换" : "地图已导入";
+    toast(unresolved
+      ? `${action}；${unresolved} 个章节关联在当前作品中未匹配`
+      : replacing ? `已替换地图“${result.map.title}”` : `已导入地图“${result.map.title}”`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    state.storyMapImportBusy = false;
+    renderStoryMapImportSummary();
+  }
 }
 
 function openImportExportDialog() {
@@ -3827,6 +4078,28 @@ function bindEvents() {
   });
   $("#chapterSearch").addEventListener("input", () => renderChapters());
   $("#openImportExportButton").addEventListener("click", openImportExportDialog);
+  $("#exportStoryMapPackageButton").addEventListener("click", openStoryMapPackageExportPanel);
+  $("#storyMapExportList").addEventListener("change", event => {
+    const checkbox = event.target.closest("[data-export-story-map]");
+    if (!checkbox) return;
+    if (checkbox.checked) state.selectedStoryMapExportIds.add(checkbox.dataset.exportStoryMap);
+    else state.selectedStoryMapExportIds.delete(checkbox.dataset.exportStoryMap);
+    renderStoryMapPackageExportList();
+  });
+  $("#selectAllStoryMapExports").addEventListener("change", event => {
+    state.selectedStoryMapExportIds = event.currentTarget.checked
+      ? new Set((state.project?.maps || []).map(storyMap => storyMap.id))
+      : new Set();
+    renderStoryMapPackageExportList();
+  });
+  $("#confirmStoryMapExportButton").addEventListener("click", exportSelectedStoryMapPackages);
+  $("#backFromStoryMapExportButton").addEventListener("click", showImportExportOverview);
+  $("#openStoryMapPackageImportButton").addEventListener("click", openStoryMapPackageImportPanel);
+  $("#storyMapPackageFile").addEventListener("change", event => selectStoryMapPackageFile(event.currentTarget.files[0]));
+  $("#storyMapImportMode").addEventListener("change", updateStoryMapImportMode);
+  $("#storyMapImportTitle").addEventListener("input", () => renderStoryMapImportSummary());
+  $("#confirmStoryMapImportButton").addEventListener("click", importStoryMapPackage);
+  $("#backFromStoryMapImportButton").addEventListener("click", showImportExportOverview);
   $("#openTxtImportFromTransfer").addEventListener("click", openTxtImportPanel);
   $("#openFullBookImportFromTransfer").addEventListener("click", openFullBookImportPanel);
   $("#openChapterTxtExportButton").addEventListener("click", openChapterTxtExportPanel);
@@ -3935,12 +4208,18 @@ function bindEvents() {
     state.markdownImportBusy = false;
     state.selectedTxtExportChapterIds.clear();
     state.selectedMarkdownExportChapterIds.clear();
+    state.selectedStoryMapExportIds.clear();
+    state.storyMapExportBusy = false;
+    state.pendingStoryMapPackage = null;
+    state.storyMapImportBusy = false;
     $("#importTxtFiles").value = "";
     $("#fullBookImportFile").value = "";
     $("#markdownImportFiles").value = "";
+    $("#storyMapPackageFile").value = "";
     renderTxtImportFileSummary();
     renderFullBookImportPreview();
     renderMarkdownImportSummary();
+    renderStoryMapImportSummary();
     showImportExportOverview();
   });
   $("#addVolumeButton").addEventListener("click", openNewVolumeDialog);

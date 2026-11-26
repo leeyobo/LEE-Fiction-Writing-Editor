@@ -1,4 +1,5 @@
 import io
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -227,6 +228,208 @@ class ApiFlowTest(unittest.TestCase):
         self.assertEqual([item["id"] for item in after_delete["maps"]], [first_map["id"]])
         refused = self.client.delete(f"/api/maps/{first_map['id']}")
         self.assertEqual(refused.status_code, 409)
+
+    def test_story_map_package_export_and_import_as_new_map(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Map package", "description": ""}
+        ).json()
+        story_map = project["maps"][0]
+        chapter = project["chapters"][0]
+        source = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={
+                "label": "起点", "note": "节点备注", "node_type": "plot", "shape": "diamond",
+                "color": "violet", "x": 120, "y": 230, "chapter_id": chapter["id"],
+                "map_id": story_map["id"],
+            },
+        ).json()
+        target = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={
+                "label": "终点", "node_type": "character", "shape": "hexagon",
+                "color": "green", "x": 510, "y": 280, "map_id": story_map["id"],
+            },
+        ).json()
+        self.client.post(
+            f"/api/nodes/{source['id']}/notes",
+            json={"content": "锁定的线索", "locked": True},
+        )
+        edge = self.client.post(
+            f"/api/projects/{project['id']}/edges",
+            json={
+                "source_id": source["id"], "target_id": target["id"], "label": "推动情节",
+                "chapter_id": chapter["id"], "line_style": "dashed", "color": "rose",
+                "source_port": "bottom", "target_port": "top_left",
+            },
+        ).json()
+        self.assertEqual(edge["map_id"], story_map["id"])
+
+        exported = self.client.get(f"/api/projects/{project['id']}/maps/{story_map['id']}/package")
+        self.assertEqual(exported.status_code, 200)
+        package = exported.json()
+        self.assertEqual(package["format"], "lee-story-map")
+        self.assertEqual(package["version"], 1)
+        self.assertEqual(package["title"], story_map["title"])
+        self.assertEqual(len(package["nodes"]), 2)
+        self.assertEqual(len(package["edges"]), 1)
+        source_package_node = next(node for node in package["nodes"] if node["key"] == source["id"])
+        self.assertEqual(source_package_node["chapter"]["title"], chapter["title"])
+        self.assertEqual(source_package_node["notes"], [{"content": "锁定的线索", "locked": True}])
+        self.assertEqual(package["edges"][0]["source_key"], source["id"])
+
+        imported = self.client.post(
+            f"/api/projects/{project['id']}/maps/import",
+            json={**package, "title": "导入后的地图"},
+        )
+        self.assertEqual(imported.status_code, 201)
+        result = imported.json()
+        self.assertEqual(result["map"]["title"], "导入后的地图")
+        self.assertNotEqual(result["map"]["id"], story_map["id"])
+        self.assertEqual(len(result["nodes"]), 2)
+        self.assertEqual(len(result["edges"]), 1)
+        self.assertEqual(len(result["notes"]), 1)
+        imported_source = next(node for node in result["nodes"] if node["label"] == "起点")
+        self.assertNotEqual(imported_source["id"], source["id"])
+        self.assertEqual(imported_source["map_id"], result["map"]["id"])
+        self.assertEqual(imported_source["chapter_id"], chapter["id"])
+        self.assertEqual(imported_source["x"], 120)
+        self.assertEqual(result["edges"][0]["map_id"], result["map"]["id"])
+        self.assertEqual(result["edges"][0]["source_id"], imported_source["id"])
+        self.assertEqual(result["edges"][0]["source_port"], "bottom")
+        self.assertTrue(result["notes"][0]["locked"])
+        self.assertEqual(result["chapter_links"], {"resolved": 2, "unresolved": 0})
+
+        other_project = self.client.post(
+            "/api/projects", json={"title": "Map package destination", "description": ""}
+        ).json()
+        cross_project = self.client.post(
+            f"/api/projects/{other_project['id']}/maps/import",
+            json={**package, "title": "跨作品导入"},
+        )
+        self.assertEqual(cross_project.status_code, 201)
+        self.assertEqual(cross_project.json()["chapter_links"], {"resolved": 2, "unresolved": 0})
+        destination_chapter_id = other_project["chapters"][0]["id"]
+        cross_linked = next(node for node in cross_project.json()["nodes"] if node["label"] == "起点")
+        self.assertEqual(cross_linked["chapter_id"], destination_chapter_id)
+
+        before_count = len(self.client.get(f"/api/projects/{project['id']}").json()["maps"])
+        invalid = self.client.post(
+            f"/api/projects/{project['id']}/maps/import",
+            json={
+                "format": "lee-story-map", "version": 1, "title": "不应创建",
+                "nodes": [{"key": "only", "label": "唯一节点"}],
+                "edges": [{"source_key": "only", "target_key": "missing"}],
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        after_count = len(self.client.get(f"/api/projects/{project['id']}").json()["maps"])
+        self.assertEqual(after_count, before_count)
+
+    def test_story_map_package_can_replace_an_existing_map(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Replace map", "description": ""}
+        ).json()
+        target_map = project["maps"][0]
+        source_map = self.client.post(
+            f"/api/projects/{project['id']}/maps", json={"title": "导入来源"}
+        ).json()
+        old_node = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "将被替换的节点", "map_id": target_map["id"]},
+        ).json()
+        source_node = self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "替换后的节点", "note": "新地图注释", "shape": "diamond", "map_id": source_map["id"]},
+        ).json()
+        self.client.post(
+            f"/api/nodes/{source_node['id']}/notes", json={"content": "替换后的便签", "locked": True}
+        )
+        package = self.client.get(
+            f"/api/projects/{project['id']}/maps/{source_map['id']}/package"
+        ).json()
+
+        invalid = self.client.post(
+            f"/api/projects/{project['id']}/maps/{target_map['id']}/import",
+            json={
+                "format": "lee-story-map", "version": 1, "title": "无效包",
+                "nodes": [{"key": "only", "label": "节点"}],
+                "edges": [{"source_key": "only", "target_key": "missing"}],
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        after_invalid = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual([node["id"] for node in after_invalid["nodes"] if node["map_id"] == target_map["id"]], [old_node["id"]])
+
+        replaced = self.client.post(
+            f"/api/projects/{project['id']}/maps/{target_map['id']}/import", json=package
+        )
+        self.assertEqual(replaced.status_code, 200)
+        result = replaced.json()
+        self.assertEqual(result["map"]["id"], target_map["id"])
+        self.assertEqual(result["map"]["title"], target_map["title"])
+        self.assertEqual([node["label"] for node in result["nodes"]], ["替换后的节点"])
+        self.assertNotEqual(result["nodes"][0]["id"], source_node["id"])
+        self.assertEqual(len(result["notes"]), 1)
+        self.assertTrue(result["notes"][0]["locked"])
+
+        updated_project = self.client.get(f"/api/projects/{project['id']}").json()
+        self.assertEqual(len(updated_project["maps"]), 2)
+        self.assertEqual(
+            {node["map_id"] for node in updated_project["nodes"]},
+            {target_map["id"], source_map["id"]},
+        )
+        self.assertEqual(
+            len([node for node in updated_project["nodes"] if node["map_id"] == target_map["id"]]), 1
+        )
+
+        other_project = self.client.post(
+            "/api/projects", json={"title": "Other project", "description": ""}
+        ).json()
+        wrong_project = self.client.post(
+            f"/api/projects/{other_project['id']}/maps/{target_map['id']}/import", json=package
+        )
+        self.assertEqual(wrong_project.status_code, 404)
+
+    def test_multiple_story_map_packages_export_as_zip(self):
+        project = self.client.post(
+            "/api/projects", json={"title": "Multi-map export", "description": ""}
+        ).json()
+        first_map = project["maps"][0]
+        second_map = self.client.post(
+            f"/api/projects/{project['id']}/maps", json={"title": "支线故事"}
+        ).json()
+        self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "主线节点", "map_id": first_map["id"]},
+        )
+        self.client.post(
+            f"/api/projects/{project['id']}/nodes",
+            json={"label": "支线节点", "map_id": second_map["id"]},
+        )
+
+        response = self.client.post(
+            f"/api/projects/{project['id']}/maps/export-zip",
+            json={"map_ids": [first_map["id"], second_map["id"]]},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"主故事线.leemap", "支线故事.leemap"})
+            first_package = json.loads(archive.read("主故事线.leemap"))
+            second_package = json.loads(archive.read("支线故事.leemap"))
+        self.assertEqual(first_package["nodes"][0]["label"], "主线节点")
+        self.assertEqual(second_package["nodes"][0]["label"], "支线节点")
+
+        duplicate_ids = self.client.post(
+            f"/api/projects/{project['id']}/maps/export-zip",
+            json={"map_ids": [first_map["id"], first_map["id"]]},
+        )
+        self.assertEqual(duplicate_ids.status_code, 400)
+        missing_map = self.client.post(
+            f"/api/projects/{project['id']}/maps/export-zip",
+            json={"map_ids": ["not-a-map"]},
+        )
+        self.assertEqual(missing_map.status_code, 404)
 
     def test_existing_single_canvas_database_is_migrated_to_default_story_map(self):
         legacy_path = Path(self.temporary_directory.name) / "legacy-map.db"

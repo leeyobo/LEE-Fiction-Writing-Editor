@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import re
 import secrets
@@ -333,6 +334,10 @@ class MarkdownChapterExport(BaseModel):
     files: List[MarkdownChapterExportItem] = Field(min_length=1, max_length=1000)
 
 
+class StoryMapPackageExport(BaseModel):
+    map_ids: List[str] = Field(min_length=1, max_length=100)
+
+
 class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=120)
     content: Optional[str] = None
@@ -407,10 +412,52 @@ class EdgeUpdate(BaseModel):
     color: Optional[str] = Field(default=None, pattern="^(blue|violet|amber|green|rose|slate)$")
 
 
+class MapChapterReference(BaseModel):
+    id: Optional[str] = None
+    title: str = Field(min_length=1, max_length=120)
+    volume_title: Optional[str] = Field(default=None, max_length=120)
+
+
+class StoryMapPackageNode(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=5000)
+    node_type: NodeType = "plot"
+    shape: NodeShape = "rounded"
+    color: str = Field(default="blue", pattern="^(blue|violet|amber|green|rose|slate)$")
+    x: float = Field(default=0, allow_inf_nan=False)
+    y: float = Field(default=0, allow_inf_nan=False)
+    chapter: Optional[MapChapterReference] = None
+    notes: List[NodeNoteCreate] = Field(default_factory=list, max_length=100)
+
+
+class StoryMapPackageEdge(BaseModel):
+    source_key: str = Field(min_length=1, max_length=120)
+    target_key: str = Field(min_length=1, max_length=120)
+    label: str = Field(default="", max_length=5000)
+    chapter: Optional[MapChapterReference] = None
+    line_style: Literal["solid", "dashed", "dotted"] = "solid"
+    color: str = Field(default="blue", pattern="^(blue|violet|amber|green|rose|slate)$")
+    source_port: Literal[
+        "top", "right", "bottom", "left", "top_left", "top_right", "bottom_right", "bottom_left"
+    ] = "right"
+    target_port: Literal[
+        "top", "right", "bottom", "left", "top_left", "top_right", "bottom_right", "bottom_left"
+    ] = "left"
+
+
+class StoryMapPackage(BaseModel):
+    format: Literal["lee-story-map"] = "lee-story-map"
+    version: int = Field(default=1, ge=1, le=1)
+    title: str = Field(min_length=1, max_length=120)
+    nodes: List[StoryMapPackageNode] = Field(default_factory=list, max_length=5000)
+    edges: List[StoryMapPackageEdge] = Field(default_factory=list, max_length=10000)
+
+
 app = FastAPI(
     title="墨图小说编辑器 API",
     description="章节、故事地图节点和关系的自托管 API",
-    version="0.12.0",
+    version="0.15.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -428,7 +475,7 @@ def startup() -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lee-fiction-api", "version": "0.12.0"}
+    return {"ok": True, "service": "lee-fiction-api", "version": "0.15.0"}
 
 
 @app.get("/api/projects", dependencies=[Depends(authorize)])
@@ -524,6 +571,316 @@ def create_story_map(project_id: str, payload: StoryMapCreate):
         connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
         row = connection.execute("SELECT * FROM story_maps WHERE id = ?", (map_id,)).fetchone()
     return dict(row)
+
+
+def chapter_reference(connection: sqlite3.Connection, project_id: str, chapter_id: Optional[str]):
+    if not chapter_id:
+        return None
+    row = connection.execute(
+        """SELECT chapters.id, chapters.title, volumes.title AS volume_title
+           FROM chapters LEFT JOIN volumes ON volumes.id = chapters.volume_id
+           WHERE chapters.id = ? AND chapters.project_id = ?""",
+        (chapter_id, project_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+@app.get("/api/projects/{project_id}/maps/{map_id}/package", dependencies=[Depends(authorize)])
+def export_story_map_package(project_id: str, map_id: str):
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        return build_story_map_package(connection, project_id, map_id)
+
+
+def build_story_map_package(connection: sqlite3.Connection, project_id: str, map_id: str):
+    story_map = connection.execute(
+        "SELECT id, title FROM story_maps WHERE id = ? AND project_id = ?", (map_id, project_id)
+    ).fetchone()
+    if not story_map:
+        raise HTTPException(status_code=404, detail="故事地图不存在或不属于当前作品")
+    node_rows = connection.execute(
+        "SELECT * FROM nodes WHERE project_id = ? AND map_id = ? ORDER BY created_at, id",
+        (project_id, map_id),
+    ).fetchall()
+    edge_rows = connection.execute(
+        "SELECT * FROM edges WHERE project_id = ? AND map_id = ? ORDER BY created_at, id",
+        (project_id, map_id),
+    ).fetchall()
+    note_rows = connection.execute(
+        """SELECT node_notes.* FROM node_notes
+           JOIN nodes ON nodes.id = node_notes.node_id
+           WHERE nodes.project_id = ? AND nodes.map_id = ?
+           ORDER BY node_notes.node_id, node_notes.position, node_notes.created_at""",
+        (project_id, map_id),
+    ).fetchall()
+    notes_by_node = {}
+    for row in note_rows:
+        notes_by_node.setdefault(row["node_id"], []).append({
+            "content": row["content"], "locked": bool(row["locked"]),
+        })
+    nodes = [{
+        "key": row["id"], "label": row["label"], "note": row["note"],
+        "node_type": row["node_type"], "shape": row["shape"], "color": row["color"],
+        "x": row["x"], "y": row["y"],
+        "chapter": chapter_reference(connection, project_id, row["chapter_id"]),
+        "notes": notes_by_node.get(row["id"], []),
+    } for row in node_rows]
+    edges = [{
+        "source_key": row["source_id"], "target_key": row["target_id"], "label": row["label"],
+        "chapter": chapter_reference(connection, project_id, row["chapter_id"]),
+        "line_style": row["line_style"], "color": row["color"],
+        "source_port": row["source_port"], "target_port": row["target_port"],
+    } for row in edge_rows]
+    return {
+        "format": "lee-story-map", "version": 1, "title": story_map["title"],
+        "nodes": nodes, "edges": edges,
+    }
+
+
+@app.post("/api/projects/{project_id}/maps/export-zip", dependencies=[Depends(authorize)])
+def export_story_maps_package_zip(project_id: str, payload: StoryMapPackageExport):
+    if len(set(payload.map_ids)) != len(payload.map_ids):
+        raise HTTPException(status_code=400, detail="导出列表中包含重复故事地图")
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        archive_buffer = io.BytesIO()
+        used_names = set()
+        with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for map_id in payload.map_ids:
+                package = build_story_map_package(connection, project_id, map_id)
+                base_name = safe_archive_component(package["title"])
+                filename = f"{base_name}.leemap"
+                suffix = 2
+                while filename.casefold() in used_names:
+                    filename = f"{base_name} ({suffix}).leemap"
+                    suffix += 1
+                used_names.add(filename.casefold())
+                archive.writestr(
+                    filename,
+                    f"{json.dumps(package, ensure_ascii=False, indent=2)}\n",
+                )
+    return Response(content=archive_buffer.getvalue(), media_type="application/zip")
+
+
+@app.post("/api/projects/{project_id}/maps/import", status_code=201, dependencies=[Depends(authorize)])
+def import_story_map_package(project_id: str, payload: StoryMapPackage):
+    if sum(len(node.notes) for node in payload.nodes) > 10_000:
+        raise HTTPException(status_code=413, detail="故事地图数据包中的便签总数不能超过 10000 条")
+    node_keys = [node.key for node in payload.nodes]
+    if len(set(node_keys)) != len(node_keys):
+        raise HTTPException(status_code=400, detail="地图数据包中包含重复节点标识")
+    node_key_set = set(node_keys)
+    edge_pairs = set()
+    for edge in payload.edges:
+        if edge.source_key not in node_key_set or edge.target_key not in node_key_set:
+            raise HTTPException(status_code=400, detail="地图连线引用了不存在的节点")
+        if edge.source_key == edge.target_key:
+            raise HTTPException(status_code=400, detail="地图数据包中不能包含连接自身的连线")
+        edge_pair = (edge.source_key, edge.target_key)
+        if edge_pair in edge_pairs:
+            raise HTTPException(status_code=400, detail="地图数据包中包含重复连线")
+        edge_pairs.add(edge_pair)
+
+    timestamp = now()
+    map_id = new_id("map")
+    node_ids = {node.key: new_id("node") for node in payload.nodes}
+    imported_nodes = []
+    imported_edges = []
+    imported_notes = []
+    resolved_links = 0
+    unresolved_links = 0
+
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        map_position = connection.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM story_maps WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()["position"]
+        connection.execute(
+            "INSERT INTO story_maps(id, project_id, title, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (map_id, project_id, payload.title, map_position, timestamp, timestamp),
+        )
+
+        def resolve_chapter(reference):
+            nonlocal resolved_links, unresolved_links
+            if not reference:
+                return None
+            chapter = None
+            if reference.id:
+                chapter = connection.execute(
+                    "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (reference.id, project_id)
+                ).fetchone()
+            if not chapter:
+                query = """SELECT chapters.id FROM chapters
+                           LEFT JOIN volumes ON volumes.id = chapters.volume_id
+                           WHERE chapters.project_id = ? AND chapters.title = ?"""
+                params = [project_id, reference.title]
+                if reference.volume_title is not None:
+                    query += " AND COALESCE(volumes.title, '') = ?"
+                    params.append(reference.volume_title)
+                query += " ORDER BY volumes.position, chapters.position, chapters.created_at LIMIT 1"
+                chapter = connection.execute(query, params).fetchone()
+            if chapter:
+                resolved_links += 1
+                return chapter["id"]
+            unresolved_links += 1
+            return None
+
+        for position, node in enumerate(payload.nodes):
+            node_id = node_ids[node.key]
+            connection.execute(
+                """INSERT INTO nodes(id, project_id, map_id, label, note, node_type, shape, color, x, y,
+                   chapter_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (node_id, project_id, map_id, node.label, node.note, node.node_type, node.shape,
+                 node.color, node.x, node.y, resolve_chapter(node.chapter), timestamp, timestamp),
+            )
+            row = connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+            imported_nodes.append(serialize_node(row))
+            for note_position, note in enumerate(node.notes):
+                note_id = new_id("note")
+                connection.execute(
+                    """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (note_id, project_id, node_id, note.content, int(note.locked), note_position, timestamp, timestamp),
+                )
+                note_row = connection.execute("SELECT * FROM node_notes WHERE id = ?", (note_id,)).fetchone()
+                imported_notes.append({**dict(note_row), "locked": bool(note_row["locked"])})
+
+        for edge in payload.edges:
+            edge_id = new_id("edge")
+            connection.execute(
+                """INSERT INTO edges(id, project_id, map_id, source_id, target_id, label, chapter_id,
+                   line_style, color, source_port, target_port, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (edge_id, project_id, map_id, node_ids[edge.source_key], node_ids[edge.target_key],
+                 edge.label, resolve_chapter(edge.chapter), edge.line_style, edge.color,
+                 edge.source_port, edge.target_port, timestamp),
+            )
+            imported_edges.append(dict(connection.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
+        imported_map = dict(connection.execute("SELECT * FROM story_maps WHERE id = ?", (map_id,)).fetchone())
+
+    return {
+        "map": imported_map,
+        "nodes": imported_nodes,
+        "edges": imported_edges,
+        "notes": imported_notes,
+        "chapter_links": {"resolved": resolved_links, "unresolved": unresolved_links},
+    }
+
+
+@app.post("/api/projects/{project_id}/maps/{map_id}/import", dependencies=[Depends(authorize)])
+def replace_story_map_with_package(project_id: str, map_id: str, payload: StoryMapPackage):
+    if sum(len(node.notes) for node in payload.nodes) > 10_000:
+        raise HTTPException(status_code=413, detail="故事地图数据包中的便签总数不能超过 10000 条")
+    node_keys = [node.key for node in payload.nodes]
+    if len(set(node_keys)) != len(node_keys):
+        raise HTTPException(status_code=400, detail="地图数据包中包含重复节点标识")
+    node_key_set = set(node_keys)
+    edge_pairs = set()
+    for edge in payload.edges:
+        if edge.source_key not in node_key_set or edge.target_key not in node_key_set:
+            raise HTTPException(status_code=400, detail="地图连线引用了不存在的节点")
+        if edge.source_key == edge.target_key:
+            raise HTTPException(status_code=400, detail="地图数据包中不能包含连接自身的连线")
+        edge_pair = (edge.source_key, edge.target_key)
+        if edge_pair in edge_pairs:
+            raise HTTPException(status_code=400, detail="地图数据包中包含重复连线")
+        edge_pairs.add(edge_pair)
+
+    with db() as connection:
+        project = connection.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        target_map = connection.execute(
+            "SELECT * FROM story_maps WHERE id = ? AND project_id = ?", (map_id, project_id)
+        ).fetchone()
+        if not target_map:
+            raise HTTPException(status_code=404, detail="目标故事地图不存在或不属于当前作品")
+
+        connection.execute("DELETE FROM nodes WHERE map_id = ?", (map_id,))
+        node_ids = {node.key: new_id("node") for node in payload.nodes}
+        timestamp = now()
+        imported_nodes = []
+        imported_edges = []
+        imported_notes = []
+        resolved_links = 0
+        unresolved_links = 0
+
+        def resolve_chapter(reference):
+            nonlocal resolved_links, unresolved_links
+            if not reference:
+                return None
+            chapter = None
+            if reference.id:
+                chapter = connection.execute(
+                    "SELECT id FROM chapters WHERE id = ? AND project_id = ?", (reference.id, project_id)
+                ).fetchone()
+            if not chapter:
+                query = """SELECT chapters.id FROM chapters
+                           LEFT JOIN volumes ON volumes.id = chapters.volume_id
+                           WHERE chapters.project_id = ? AND chapters.title = ?"""
+                params = [project_id, reference.title]
+                if reference.volume_title is not None:
+                    query += " AND COALESCE(volumes.title, '') = ?"
+                    params.append(reference.volume_title)
+                query += " ORDER BY volumes.position, chapters.position, chapters.created_at LIMIT 1"
+                chapter = connection.execute(query, params).fetchone()
+            if chapter:
+                resolved_links += 1
+                return chapter["id"]
+            unresolved_links += 1
+            return None
+
+        for position, node in enumerate(payload.nodes):
+            node_id = node_ids[node.key]
+            connection.execute(
+                """INSERT INTO nodes(id, project_id, map_id, label, note, node_type, shape, color, x, y,
+                   chapter_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (node_id, project_id, map_id, node.label, node.note, node.node_type, node.shape,
+                 node.color, node.x, node.y, resolve_chapter(node.chapter), timestamp, timestamp),
+            )
+            row = connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+            imported_nodes.append(serialize_node(row))
+            for note_position, note in enumerate(node.notes):
+                note_id = new_id("note")
+                connection.execute(
+                    """INSERT INTO node_notes(id, project_id, node_id, content, locked, position, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (note_id, project_id, node_id, note.content, int(note.locked), note_position, timestamp, timestamp),
+                )
+                note_row = connection.execute("SELECT * FROM node_notes WHERE id = ?", (note_id,)).fetchone()
+                imported_notes.append({**dict(note_row), "locked": bool(note_row["locked"])})
+
+        for edge in payload.edges:
+            edge_id = new_id("edge")
+            connection.execute(
+                """INSERT INTO edges(id, project_id, map_id, source_id, target_id, label, chapter_id,
+                   line_style, color, source_port, target_port, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (edge_id, project_id, map_id, node_ids[edge.source_key], node_ids[edge.target_key],
+                 edge.label, resolve_chapter(edge.chapter), edge.line_style, edge.color,
+                 edge.source_port, edge.target_port, timestamp),
+            )
+            imported_edges.append(dict(connection.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()))
+
+        connection.execute("UPDATE story_maps SET updated_at = ? WHERE id = ?", (timestamp, map_id))
+        connection.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (timestamp, project_id))
+        updated_map = dict(connection.execute("SELECT * FROM story_maps WHERE id = ?", (map_id,)).fetchone())
+
+    return {
+        "map": updated_map,
+        "nodes": imported_nodes,
+        "edges": imported_edges,
+        "notes": imported_notes,
+        "chapter_links": {"resolved": resolved_links, "unresolved": unresolved_links},
+    }
 
 
 @app.patch("/api/maps/{map_id}", dependencies=[Depends(authorize)])

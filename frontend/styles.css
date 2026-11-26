@@ -569,7 +569,7 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -.03em; }
 .transfer-modal .modal-actions button { min-width: 120px; }
 .txt-import-summary { min-height: 20px; margin: -5px 0 7px; color: var(--muted); font-size: 12px; }
 .txt-import-mode-hint { margin: -10px 0 14px; font-size: 11px; }
-#importTxtTargetChapterField[hidden] { display: none; }
+#importTxtTargetChapterField[hidden], #storyMapReplacementTargetField[hidden] { display: none; }
 .txt-import-summary.error { color: #bd3548; }
 .txt-import-file-list { display: grid; gap: 4px; max-height: 132px; margin: 0 0 14px; padding: 0; overflow: auto; list-style: none; }
 .txt-import-file-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 9px; border-radius: 7px; color: #415875; background: #f3f7fd; font-size: 11px; }

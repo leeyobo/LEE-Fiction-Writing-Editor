@@ -344,7 +344,7 @@
       <form method="dialog">
         <div class="modal-heading"><div><p class="eyebrow">IMPORT / EXPORT</p><h2 id="importExportDialogTitle">导入 / 导出</h2></div><div class="transfer-heading-actions"><button id="backToImportExportButton" class="transfer-back-button" type="button" hidden>← 返回</button><button value="cancel" type="submit" aria-label="关闭">×</button></div></div>
         <section id="importExportOverview" class="transfer-overview">
-          <p class="modal-copy">选择要处理的内容类型。当前作品和故事地图的完整导入导出正在规划中。</p>
+          <p class="modal-copy">选择要处理的内容类型。完整作品项目包仍在规划中，章节正文和故事地图可分别导入或导出。</p>
           <div class="transfer-groups">
             <section class="transfer-group">
               <h3>当前作品 · 完整项目包</h3>
@@ -357,8 +357,8 @@
             <section class="transfer-group">
               <h3>故事地图</h3>
               <div class="transfer-actions">
-                <button class="transfer-action" type="button" disabled><strong>导出地图</strong><span>地图数据包</span><small>规划中</small></button>
-                <button class="transfer-action" type="button" disabled><strong>导入地图</strong><span>创建为新地图</span><small>规划中</small></button>
+                <button id="exportStoryMapPackageButton" class="transfer-action transfer-action-available" type="button"><strong>导出故事地图</strong><span>可选择单张或多张地图</span><small>可用</small></button>
+                <button id="openStoryMapPackageImportButton" class="transfer-action transfer-action-available" type="button"><strong>导入地图</strong><span>创建为新地图</span><small>可用</small></button>
               </div>
               <p>包含节点、连线、便签和章节关联。</p>
             </section>
@@ -419,6 +419,21 @@
           <div id="chapterMarkdownExportList" class="chapter-txt-export-list" aria-label="选择要导出的 Markdown 章节"></div>
           <label id="chapterMarkdownExportModeField" class="chapter-export-mode-field" hidden><span>多选导出方式</span><select id="chapterMarkdownExportMode"><option value="combined">合并为一个 Markdown</option><option value="separate">每章分别下载 .md</option><option value="zip">打包为 ZIP（每章一个 .md）</option></select></label>
           <div class="modal-actions"><button id="backFromChapterMarkdownExportButton" class="secondary-button" type="button">返回</button><button id="confirmChapterMarkdownExportButton" class="wide-button" type="button" disabled>导出所选章节</button></div>
+        </section>
+        <section id="storyMapExportPanel" class="chapter-txt-export-panel" hidden>
+          <p class="modal-copy">选择要导出的故事地图。单选下载 .leemap；多选会打包为 ZIP，压缩包内每张地图均为独立 .leemap 文件。</p>
+          <div class="chapter-export-selection-toolbar"><label><input id="selectAllStoryMapExports" type="checkbox" />全选</label><span id="storyMapExportSummary" aria-live="polite">已选择 0 张地图</span></div>
+          <div id="storyMapExportList" class="chapter-txt-export-list" aria-label="选择要导出的故事地图"></div>
+          <div class="modal-actions"><button id="backFromStoryMapExportButton" class="secondary-button" type="button">返回</button><button id="confirmStoryMapExportButton" class="wide-button" type="button" disabled>导出所选地图</button></div>
+        </section>
+        <section id="storyMapImportPanel" class="txt-import-panel" hidden>
+          <p class="modal-copy">选择墨图故事地图数据包（.leemap 或 JSON），可创建新地图，也可替换一张现有地图。节点、连线、便签和可匹配的章节关联都会保留。</p>
+          <label class="txt-file-picker">选择地图数据包<input id="storyMapPackageFile" type="file" accept=".leemap,.json,application/json" /></label>
+          <label>导入方式<select id="storyMapImportMode"><option value="new">新建为一张地图</option><option value="replace">替换现有地图</option></select></label>
+          <label id="storyMapImportTitleField">新地图名称<input id="storyMapImportTitle" maxlength="120" placeholder="地图名称" autocomplete="off" /></label>
+          <label id="storyMapReplacementTargetField" hidden>要替换的地图<select id="storyMapReplacementTarget"></select></label>
+          <div id="storyMapImportSummary" class="txt-import-summary" aria-live="polite">尚未选择数据包</div>
+          <div class="modal-actions"><button id="backFromStoryMapImportButton" class="secondary-button" type="button">返回</button><button id="confirmStoryMapImportButton" class="wide-button" type="button" disabled>导入为新地图</button></div>
         </section>
       </form>
     </dialog>
