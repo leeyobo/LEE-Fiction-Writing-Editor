@@ -28,6 +28,9 @@ const state = {
   selectedChapterIds: new Set(),
   pendingChapterDeleteIds: [],
   pendingTxtFiles: [],
+  pendingFullBookFile: null,
+  pendingFullBookChapters: [],
+  selectedTxtExportChapterIds: new Set(),
   pendingVolumeDeleteId: null,
   collapsedVolumeIds: new Set(),
   storyMapsCollapsed: false,
@@ -177,6 +180,125 @@ function markdownPlainText(text = "") {
     .replace(/^\s*(?:#{1,6}|>|[-+*]|\d+\.)\s+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function markdownToReadableText(markdown = "") {
+  const container = document.createElement("div");
+  container.innerHTML = markdownToEditorHtml(markdown);
+  const childrenText = node => [...node.childNodes].map(readableNodeText).join("");
+  const readableNodeText = node => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue.replace(/\u00a0/g, " ");
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const tag = node.tagName.toLowerCase();
+    if (tag === "br") return "\n";
+    if (tag === "pre") return `${node.textContent}\n\n`;
+    if (tag === "ul" || tag === "ol") {
+      const ordered = tag === "ol";
+      return [...node.children]
+        .filter(item => item.tagName.toLowerCase() === "li")
+        .map((item, index) => `${ordered ? `${index + 1}.` : "-"} ${childrenText(item).trim()}`)
+        .join("\n") + "\n\n";
+    }
+    if (tag === "table") {
+      return [...node.querySelectorAll("tr")]
+        .map(row => [...row.children].map(cell => cell.textContent.trim()).join("\t"))
+        .join("\n") + "\n\n";
+    }
+    const content = childrenText(node);
+    if (/^h[1-6]$/.test(tag) || tag === "p") return `${content.trim()}\n\n`;
+    if (tag === "blockquote") return `${content.trim().split("\n").map(line => `> ${line}`).join("\n")}\n\n`;
+    if (tag === "li") return content;
+    if (tag === "img") return node.getAttribute("alt") || "";
+    return content;
+  };
+  return [...container.childNodes]
+    .map(readableNodeText)
+    .join("")
+    .replace(/[\t ]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripRepeatedExportTitle(content, filename) {
+  const lines = String(content || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+  const fileTitle = String(filename || "").replace(/\.txt$/i, "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
+  const firstLine = (lines[0] || "").trim().replace(/^#{1,6}\s+/, "");
+  const normalize = value => String(value).normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase("zh-CN");
+  if (!fileTitle || normalize(firstLine) !== normalize(fileTitle)) return String(content || "").replace(/^\uFEFF/, "");
+  lines.shift();
+  while (lines.length && !lines[0].trim()) lines.shift();
+  return lines.join("\n");
+}
+
+function parseFullBookTxt(text, metadata = {}) {
+  const lines = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+  const chapters = [];
+  let title = null;
+  let content = [];
+  const preamble = [];
+  const normalizeLine = value => String(value || "").normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase("zh-CN");
+  const volumeNames = new Set((metadata.volumeNames || []).map(normalizeLine));
+  const bookTitle = normalizeLine(metadata.bookTitle);
+  const flush = () => {
+    if (title === null) return;
+    chapters.push({ title: title.trim(), content: content.join("\n").replace(/^\n+|\n+$/g, "") });
+  };
+  const chapterTitleFromLine = line => {
+    const marked = line.match(/^\s*【章节】\s*(.+?)\s*$/);
+    if (marked) return marked[1];
+    const markdown = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*$/);
+    if (markdown) return markdown[1];
+    const numbered = line.match(/^\s*(第\s*[0-9０-９一二三四五六七八九十百千零〇两]+\s*(?:章|回|节)(?:\s*[:：、.．-]?\s*.*)?)\s*$/);
+    const named = line.match(/^\s*(序章|序言|楔子|引子|前言|尾声|后记|番外(?:篇)?)(?:\s*[:：、.．-]?\s*.*)?\s*$/);
+    return numbered?.[1] || named?.[0]?.trim() || null;
+  };
+  for (const line of lines) {
+    if (/^\s*【卷】/.test(line) || /^\s*【作品】/.test(line)) continue;
+    if (volumeNames.has(normalizeLine(line)) || (bookTitle && bookTitle === normalizeLine(line))) continue;
+    const nextTitle = chapterTitleFromLine(line);
+    if (nextTitle) {
+      if (title === null && preamble.some(item => item.trim())) {
+        const opening = preamble.join("\n").trim();
+        if (opening) chapters.push({ title: "序章", content: opening });
+      }
+      flush();
+      title = nextTitle;
+      content = [];
+    } else if (title !== null) {
+      content.push(line);
+    } else if (!/^\s*【作品】/.test(line)) {
+      preamble.push(line);
+    }
+  }
+  flush();
+  if (chapters.length) return chapters.map(chapter => ({ ...chapter, title: chapter.title.slice(0, 120) }));
+  const fallbackContent = preamble.join("\n").trim();
+  return fallbackContent ? [{ title: "", content: fallbackContent }] : [];
+}
+
+function safeTxtFilename(title) {
+  let stem = String(title || "").trim()
+    .replace(/\.txt$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 100);
+  if (!stem) stem = "墨图导出";
+  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `_${stem}`;
+  return `${stem}.txt`;
+}
+
+function downloadTxtFile(filename, content) {
+  const windowsLineEndings = String(content).replace(/\r\n?/g, "\n").replace(/\n/g, "\r\n");
+  const blob = new Blob(["\uFEFF", windowsLineEndings], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = safeTxtFilename(filename);
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function resizeManuscript() {
@@ -1790,6 +1912,8 @@ function showImportExportOverview() {
   $("#importExportDialogTitle").textContent = "导入 / 导出";
   $("#importExportOverview").hidden = false;
   $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = true;
   $("#backToImportExportButton").hidden = true;
 }
 
@@ -1809,6 +1933,10 @@ function openTxtImportPanel() {
   volumeSelect.value = state.project.volumes.some(volume => volume.id === activeVolumeId)
     ? activeVolumeId
     : state.project.volumes[0]?.id || "";
+  $("#importTxtMode").value = "new";
+  renderTxtTargetChapterOptions(state.activeChapterId);
+  $("#importTxtTargetChapterField").hidden = true;
+  $("#importTxtModeHint").textContent = "文件内容将导入为目标卷中的新章节，按现有章节顺序自动编号。";
   $("#importTxtFiles").value = "";
   $("#importTxtEncoding").value = "utf-8";
   state.pendingTxtFiles = [];
@@ -1816,7 +1944,132 @@ function openTxtImportPanel() {
   $("#importExportDialogTitle").textContent = "导入 TXT 章节";
   $("#importExportOverview").hidden = true;
   $("#txtImportPanel").hidden = false;
+  $("#fullBookImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = true;
   $("#backToImportExportButton").hidden = false;
+}
+
+function openChapterTxtExportPanel() {
+  if (!requireProject("导出章节")) return;
+  state.selectedTxtExportChapterIds = new Set();
+  $("#chapterTxtExportMode").value = "combined";
+  renderChapterTxtExportList();
+  $("#importExportDialogTitle").textContent = "导出章节 TXT";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = true;
+  $("#chapterTxtExportPanel").hidden = false;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function renderChapterTxtExportList() {
+  const list = $("#chapterTxtExportList");
+  const selectAll = $("#selectAllTxtExportChapters");
+  const summary = $("#chapterTxtExportSummary");
+  const exportButton = $("#confirmChapterTxtExportButton");
+  const exportModeField = $("#chapterTxtExportModeField");
+  const selectedIds = state.selectedTxtExportChapterIds;
+  const chapters = state.project?.chapters || [];
+  const volumes = state.project?.volumes || [];
+  list.replaceChildren(...volumes.map(volume => {
+    const volumeChapters = chapters.filter(chapter => chapter.volume_id === volume.id);
+    if (!volumeChapters.length) return null;
+    const group = document.createElement("section");
+    group.className = "chapter-txt-export-volume";
+    const heading = document.createElement("label");
+    heading.className = "chapter-txt-export-volume-heading";
+    const volumeCheckbox = document.createElement("input");
+    volumeCheckbox.type = "checkbox";
+    volumeCheckbox.dataset.exportVolume = volume.id;
+    const volumeSelectedCount = volumeChapters.filter(chapter => selectedIds.has(chapter.id)).length;
+    volumeCheckbox.checked = volumeSelectedCount === volumeChapters.length;
+    volumeCheckbox.indeterminate = volumeSelectedCount > 0 && volumeSelectedCount < volumeChapters.length;
+    const volumeName = document.createElement("strong");
+    volumeName.textContent = volume.title;
+    const volumeCount = document.createElement("small");
+    volumeCount.textContent = `${volumeChapters.length} 章`;
+    heading.append(volumeCheckbox, volumeName, volumeCount);
+    const chapterList = document.createElement("div");
+    chapterList.className = "chapter-txt-export-items";
+    volumeChapters.forEach(chapter => {
+      const label = document.createElement("label");
+      label.className = "chapter-txt-export-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.exportChapter = chapter.id;
+      checkbox.checked = selectedIds.has(chapter.id);
+      const title = document.createElement("span");
+      title.textContent = chapterOptionLabel(chapter);
+      label.append(checkbox, title);
+      chapterList.append(label);
+    });
+    group.append(heading, chapterList);
+    return group;
+  }).filter(Boolean));
+  const selectedCount = selectedIds.size;
+  summary.textContent = `已选择 ${selectedCount} 个章节`;
+  selectAll.checked = chapters.length > 0 && selectedCount === chapters.length;
+  selectAll.indeterminate = selectedCount > 0 && selectedCount < chapters.length;
+  exportButton.disabled = selectedCount === 0;
+  exportModeField.hidden = selectedCount < 2;
+  exportButton.textContent = selectedCount > 1 ? `导出所选章节（${selectedCount}）` : "导出所选章节";
+}
+
+function exportSelectedChapterTxt() {
+  if (!requireProject("导出章节")) return;
+  const selected = state.project.chapters
+    .filter(chapter => state.selectedTxtExportChapterIds.has(chapter.id))
+    .map(chapterSnapshotForExport);
+  if (!selected.length) { toast("请先选择要导出的章节"); return; }
+  if (selected.length === 1) {
+    const chapter = selected[0];
+    const content = markdownToReadableText(chapter.content);
+    downloadTxtFile(chapter.title, `${chapter.title}\n\n${content}`);
+    toast(`已导出章节“${chapter.title}”`);
+    return;
+  }
+  if ($("#chapterTxtExportMode").value === "separate") {
+    const volumeTitles = new Map(state.project.volumes.map(volume => [volume.id, volume.title]));
+    selected.forEach(chapter => {
+      const filename = `${volumeTitles.get(chapter.volume_id) || state.project.title}-${chapter.title}`;
+      const content = markdownToReadableText(chapter.content);
+      downloadTxtFile(filename, `${chapter.title}\n\n${content}`);
+    });
+    toast(`已分别导出 ${selected.length} 个章节 TXT`);
+    return;
+  }
+  const volumeOrder = new Map(state.project.volumes.map((volume, index) => [volume.id, index]));
+  selected.sort((left, right) => {
+    const volumeDifference = (volumeOrder.get(left.volume_id) ?? Number.MAX_SAFE_INTEGER)
+      - (volumeOrder.get(right.volume_id) ?? Number.MAX_SAFE_INTEGER);
+    return volumeDifference || left.position - right.position;
+  });
+  const blocks = [];
+  state.project.volumes.forEach(volume => {
+    const volumeChapters = selected.filter(chapter => chapter.volume_id === volume.id);
+    if (!volumeChapters.length) return;
+    blocks.push(`【卷】${volume.title}\n\n${volumeChapters.map(chapter =>
+      `【章节】${chapter.title}\n\n${markdownToReadableText(chapter.content)}`.trimEnd(),
+    ).join("\n\n")}`);
+  });
+  downloadTxtFile(`${state.project.title}-选中章节`, `【作品】${state.project.title}\n\n${blocks.join("\n\n")}`);
+  toast(`已合并导出 ${selected.length} 个章节`);
+}
+
+function renderTxtTargetChapterOptions(preferredChapterId = $("#importTxtTargetChapter")?.value) {
+  const volumeId = $("#importTxtVolume").value;
+  const chapters = state.project?.chapters.filter(chapter => chapter.volume_id === volumeId) || [];
+  const select = $("#importTxtTargetChapter");
+  select.innerHTML = chapters.map(chapter => `<option value="${chapter.id}">${escapeHtml(chapterOptionLabel(chapter))}</option>`).join("");
+  if (chapters.some(chapter => chapter.id === preferredChapterId)) select.value = preferredChapterId;
+  else {
+    const activeChapter = chapters.find(chapter => chapter.id === state.activeChapterId);
+    select.value = activeChapter?.id || chapters[0]?.id || "";
+  }
+  if (chapters.length && select.value) return;
+  $("#importTxtMode").value = "new";
+  $("#importTxtTargetChapterField").hidden = true;
+  $("#importTxtModeHint").textContent = "目标故事卷中还没有章节，请选择“新建章节”导入内容。";
 }
 
 function renderTxtImportFileSummary() {
@@ -1824,12 +2077,14 @@ function renderTxtImportFileSummary() {
   const fileList = $("#importTxtFileList");
   const summary = $("#importTxtSummary");
   const importButton = $("#confirmImportTxtButton");
+  const mode = $("#importTxtMode").value;
   const totalBytes = files.reduce((total, file) => total + file.size, 0);
   let error = "";
   if (files.length > 50) error = "一次最多导入 50 个 TXT 文件";
   else if (files.some(file => file.size > 5 * 1024 * 1024)) error = "单个文件不能超过 5 MB";
   else if (totalBytes > 10 * 1024 * 1024) error = "本次文件总大小不能超过 10 MB，请分批导入";
   else if (files.some(file => !file.name.toLowerCase().endsWith(".txt"))) error = "请选择 .txt 文本文件";
+  else if (mode === "existing" && files.length > 0 && files.length !== 1) error = "替换已有章节时，请只选择一个 TXT 文件";
 
   fileList.replaceChildren(...files.map(file => {
     const item = document.createElement("li");
@@ -1841,30 +2096,50 @@ function renderTxtImportFileSummary() {
     return item;
   }));
   summary.classList.toggle("error", Boolean(error));
+  const volumeId = $("#importTxtVolume").value;
+  const targetChapter = state.project?.chapters.find(chapter => chapter.id === $("#importTxtTargetChapter").value);
+  const firstNumber = volumeId && state.project ? nextChapterNumberInVolume(volumeId) : 1;
+  const targetDescription = mode === "existing"
+    ? `将替换“${targetChapter?.title || "所选章节"}”的正文`
+    : files.length === 1
+      ? `将新建第 ${firstNumber} 章`
+      : `将新建第 ${firstNumber}–${firstNumber + files.length - 1} 章`;
   summary.textContent = error || (files.length
-    ? `已选 ${files.length} 个文件 · ${(totalBytes / 1024).toFixed(1)} KB · 将创建为新章节`
+    ? `已选 ${files.length} 个文件 · ${(totalBytes / 1024).toFixed(1)} KB · ${targetDescription}`
     : "尚未选择文件");
-  importButton.disabled = !files.length || Boolean(error) || !$("#importTxtVolume").value;
+  importButton.textContent = mode === "existing" ? "替换章节正文" : "导入为新章节";
+  importButton.disabled = !files.length || Boolean(error) || !$("#importTxtVolume").value
+    || (mode === "existing" && !$("#importTxtTargetChapter").value);
 }
 
-function chapterTitleFromTxtFile(file) {
-  const title = file.name.replace(/\.txt$/i, "").trim();
-  return (title || "未命名章节").slice(0, 120);
+function nextChapterNumberInVolume(volumeId) {
+  const volumeChapters = state.project.chapters.filter(chapter => chapter.volume_id === volumeId);
+  const existingNumbers = volumeChapters
+    .map(chapter => chapter.title.match(/^第\s*(\d+)\s*章(?:\s|$)/)?.[1])
+    .filter(Boolean)
+    .map(Number);
+  return Math.max(volumeChapters.length, ...existingNumbers, 0) + 1;
 }
 
 async function importTxtFiles() {
   if (!state.project) return;
   const files = [...state.pendingTxtFiles].sort((left, right) => left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" }));
   if (!files.length) return;
+  const mode = $("#importTxtMode").value;
   const volumeId = $("#importTxtVolume").value;
   const volume = state.project.volumes.find(item => item.id === volumeId);
   if (!volume) { toast("请选择要导入到的故事卷"); return; }
+  const targetChapter = mode === "existing"
+    ? state.project.chapters.find(chapter => chapter.id === $("#importTxtTargetChapter").value && chapter.volume_id === volumeId)
+    : null;
+  if (mode === "existing" && !targetChapter) { toast("请选择要替换正文的章节"); return; }
+  if (mode === "existing" && files.length !== 1) { toast("替换已有章节时，请只选择一个 TXT 文件"); return; }
   const button = $("#confirmImportTxtButton");
   const encoding = $("#importTxtEncoding").value;
   button.disabled = true;
   button.textContent = "正在读取并导入…";
   try {
-    const importedFiles = await Promise.all(files.map(async file => {
+    const decodedFiles = await Promise.all(files.map(async file => {
       const buffer = await file.arrayBuffer();
       let content;
       try {
@@ -1872,7 +2147,42 @@ async function importTxtFiles() {
       } catch (_) {
         throw new Error(`“${file.name}”无法按 ${encoding.toUpperCase()} 解码，请检查文件编码后重试`);
       }
-      return { title: chapterTitleFromTxtFile(file), content };
+      return { file, content: stripRepeatedExportTitle(content, file.name) };
+    }));
+    if (decodedFiles.some(item => item.content.length > 2_000_000)) {
+      throw new Error("单个 TXT 正文不能超过 200 万字符，请拆分文件后重试");
+    }
+    if (decodedFiles.reduce((total, item) => total + item.content.length, 0) > 10_000_000) {
+      throw new Error("本次 TXT 正文总量不能超过 1000 万字符，请分批导入");
+    }
+    if (mode === "existing") {
+      if (!window.confirm(`将用“${files[0].name}”替换“${targetChapter.title}”的全部正文？章节标题和故事地图关联会保留。`)) return;
+      if (targetChapter.id === state.activeChapterId) {
+        clearTimeout(state.chapterTimer);
+        state.chapterTimer = null;
+      }
+      const updated = await api(`/api/chapters/${targetChapter.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content: decodedFiles[0].content }),
+      });
+      Object.assign(targetChapter, updated);
+      if (targetChapter.id === state.activeChapterId) {
+        state.editorHistories.set(targetChapter.id, { entries: [chapterSnapshot(targetChapter)], index: 0 });
+        updateHistoryButtons();
+      }
+      state.chapterBulkMode = false;
+      state.selectedChapterIds.clear();
+      $("#importExportDialog").close();
+      renderChapters();
+      renderChapterOptions();
+      selectChapter(targetChapter.id);
+      toast(`已将 TXT 内容写入“${targetChapter.title}”（原章节标题已保留）`);
+      return;
+    }
+    const firstNumber = nextChapterNumberInVolume(volumeId);
+    const importedFiles = decodedFiles.map((item, index) => ({
+      title: `第 ${firstNumber + index} 章`,
+      content: item.content,
     }));
     const result = await api(`/api/projects/${state.project.id}/chapters/import-text`, {
       method: "POST",
@@ -1889,9 +2199,175 @@ async function importTxtFiles() {
   } catch (error) {
     toast(error.message);
   } finally {
-    button.textContent = "导入为新章节";
+    button.textContent = $("#importTxtMode").value === "existing" ? "替换章节正文" : "导入为新章节";
     renderTxtImportFileSummary();
   }
+}
+
+function openFullBookImportPanel() {
+  if (!requireProject("导入全书")) return;
+  const activeVolumeId = state.project.chapters.find(chapter => chapter.id === state.activeChapterId)?.volume_id;
+  $("#fullBookImportVolume").innerHTML = state.project.volumes
+    .map(volume => `<option value="${volume.id}">${escapeHtml(volume.title)}</option>`)
+    .join("");
+  $("#fullBookImportVolume").value = state.project.volumes.some(volume => volume.id === activeVolumeId)
+    ? activeVolumeId
+    : state.project.volumes[0]?.id || "";
+  $("#fullBookImportFile").value = "";
+  $("#fullBookImportEncoding").value = "utf-8";
+  state.pendingFullBookFile = null;
+  state.pendingFullBookChapters = [];
+  renderFullBookImportPreview();
+  $("#importExportDialogTitle").textContent = "导入全书 TXT";
+  $("#importExportOverview").hidden = true;
+  $("#txtImportPanel").hidden = true;
+  $("#fullBookImportPanel").hidden = false;
+  $("#chapterTxtExportPanel").hidden = true;
+  $("#backToImportExportButton").hidden = false;
+}
+
+function renderFullBookImportPreview(error = "") {
+  const preview = $("#fullBookChapterPreview");
+  const summary = $("#fullBookImportSummary");
+  const button = $("#confirmFullBookImportButton");
+  preview.replaceChildren(...state.pendingFullBookChapters.slice(0, 20).map((chapter, index) => {
+    const item = document.createElement("li");
+    const title = document.createElement("span");
+    const count = document.createElement("span");
+    title.textContent = chapter.title || `第 ${index + 1} 章`;
+    count.textContent = `${wordCount(chapter.content)} 字`;
+    item.append(title, count);
+    return item;
+  }));
+  if (state.pendingFullBookChapters.length > 20) {
+    const more = document.createElement("li");
+    more.textContent = `还有 ${state.pendingFullBookChapters.length - 20} 个章节…`;
+    preview.append(more);
+  }
+  summary.classList.toggle("error", Boolean(error));
+  summary.textContent = error || (state.pendingFullBookFile
+    ? state.pendingFullBookChapters.length
+      ? `识别到 ${state.pendingFullBookChapters.length} 个章节 · ${(state.pendingFullBookFile.size / 1024).toFixed(1)} KB`
+      : "文件中没有识别到正文或章节内容"
+    : "尚未选择文件");
+  button.disabled = !state.pendingFullBookChapters.length || Boolean(error) || !$("#fullBookImportVolume").value;
+}
+
+async function selectFullBookImportFile(file) {
+  state.pendingFullBookFile = file || null;
+  state.pendingFullBookChapters = [];
+  if (!file) { renderFullBookImportPreview(); return; }
+  if (!file.name.toLowerCase().endsWith(".txt")) {
+    renderFullBookImportPreview("请选择 .txt 文本文件");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    renderFullBookImportPreview("全书 TXT 文件不能超过 10 MB");
+    return;
+  }
+  try {
+    const content = new TextDecoder($("#fullBookImportEncoding").value, { fatal: true })
+      .decode(await file.arrayBuffer())
+      .replace(/^\uFEFF/, "");
+    const bookTitle = file.name.replace(/\.txt$/i, "").replace(/-全书$/i, "");
+    state.pendingFullBookChapters = parseFullBookTxt(content, {
+      bookTitle,
+      volumeNames: state.project.volumes.map(volume => volume.title),
+    }).map((chapter, index) => ({
+      title: chapter.title || `第 ${index + 1} 章`,
+      content: chapter.content,
+    }));
+    if (state.pendingFullBookChapters.length > 50) {
+      state.pendingFullBookChapters = [];
+      renderFullBookImportPreview("一次最多导入 50 个章节，请拆分文件后重试");
+      return;
+    }
+    if (state.pendingFullBookChapters.some(chapter => chapter.content.length > 2_000_000)) {
+      state.pendingFullBookChapters = [];
+      renderFullBookImportPreview("单个章节正文不能超过 200 万字符，请拆分文件后重试");
+      return;
+    }
+    if (state.pendingFullBookChapters.reduce((total, chapter) => total + chapter.content.length, 0) > 10_000_000) {
+      state.pendingFullBookChapters = [];
+      renderFullBookImportPreview("全书正文总量不能超过 1000 万字符");
+      return;
+    }
+    if (!content.trim()) renderFullBookImportPreview("文件内容为空");
+    else renderFullBookImportPreview();
+  } catch (_) {
+    renderFullBookImportPreview(`无法按 ${$("#fullBookImportEncoding").value.toUpperCase()} 解码，请检查文件编码后重试`);
+  }
+}
+
+async function importFullBookTxt() {
+  if (!state.project || !state.pendingFullBookChapters.length) return;
+  const volumeId = $("#fullBookImportVolume").value;
+  const volume = state.project.volumes.find(item => item.id === volumeId);
+  if (!volume) { toast("请选择要导入到的故事卷"); return; }
+  if (state.pendingFullBookChapters.length > 50) { toast("一次最多导入 50 个章节"); return; }
+  const button = $("#confirmFullBookImportButton");
+  button.disabled = true;
+  button.textContent = "正在导入全书…";
+  try {
+    const firstNumber = nextChapterNumberInVolume(volumeId);
+    const files = state.pendingFullBookChapters.map((chapter, index) => ({
+      title: chapter.title || `第 ${firstNumber + index} 章`,
+      content: chapter.content,
+    }));
+    const result = await api(`/api/projects/${state.project.id}/chapters/import-text`, {
+      method: "POST",
+      body: JSON.stringify({ volume_id: volumeId, files }),
+    });
+    state.project.chapters.push(...result.chapters);
+    sortProjectChapters();
+    state.chapterBulkMode = false;
+    state.selectedChapterIds.clear();
+    $("#importExportDialog").close();
+    renderChapterOptions();
+    selectChapter(result.chapters[0].id);
+    toast(`已将全书拆分并导入 ${result.chapters.length} 个章节到“${volume.title}”`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.textContent = "导入为新章节";
+    renderFullBookImportPreview();
+  }
+}
+
+function chapterSnapshotForExport(chapter) {
+  if (chapter.id !== state.activeChapterId) return chapter;
+  return {
+    ...chapter,
+    title: $("#chapterTitleInput").value.trim() || "未命名章节",
+    content: editorToMarkdown(),
+  };
+}
+
+function exportBookTxt() {
+  if (!requireProject("导出全书")) return;
+  const chapterSnapshots = state.project.chapters.map(chapterSnapshotForExport);
+  if (!chapterSnapshots.length) { toast("当前作品没有可导出的章节"); return; }
+  const volumeOrder = new Map(state.project.volumes.map((volume, index) => [volume.id, index]));
+  chapterSnapshots.sort((left, right) => {
+    const volumeDifference = (volumeOrder.get(left.volume_id) ?? Number.MAX_SAFE_INTEGER)
+      - (volumeOrder.get(right.volume_id) ?? Number.MAX_SAFE_INTEGER);
+    return volumeDifference || left.position - right.position;
+  });
+  const volumeBlocks = state.project.volumes.map(volume => {
+    const chapters = chapterSnapshots.filter(chapter => chapter.volume_id === volume.id);
+    if (!chapters.length) return "";
+    const chapterBlocks = chapters.map(chapter => {
+      const content = markdownToReadableText(chapter.content);
+      return `【章节】${chapter.title}\n\n${content}`.trimEnd();
+    });
+    return `【卷】${volume.title}\n\n${chapterBlocks.join("\n\n")}`;
+  }).filter(Boolean);
+  const unassignedChapters = chapterSnapshots.filter(chapter => !volumeOrder.has(chapter.volume_id));
+  if (unassignedChapters.length) {
+    volumeBlocks.push(`【卷】未分类\n\n${unassignedChapters.map(chapter => `【章节】${chapter.title}\n\n${markdownToReadableText(chapter.content)}`.trimEnd()).join("\n\n")}`);
+  }
+  downloadTxtFile(`${state.project.title}-全书`, `【作品】${state.project.title}\n\n${volumeBlocks.join("\n\n")}`);
+  toast(`已导出全书，共 ${chapterSnapshots.length} 个章节`);
 }
 
 function openNewVolumeDialog() {
@@ -2890,18 +3366,74 @@ function bindEvents() {
   $("#chapterSearch").addEventListener("input", () => renderChapters());
   $("#openImportExportButton").addEventListener("click", openImportExportDialog);
   $("#openTxtImportFromTransfer").addEventListener("click", openTxtImportPanel);
+  $("#openFullBookImportFromTransfer").addEventListener("click", openFullBookImportPanel);
+  $("#openChapterTxtExportButton").addEventListener("click", openChapterTxtExportPanel);
+  $("#chapterTxtExportList").addEventListener("change", event => {
+    const volumeCheckbox = event.target.closest("[data-export-volume]");
+    if (volumeCheckbox) {
+      const volumeId = volumeCheckbox.dataset.exportVolume;
+      state.project.chapters.filter(chapter => chapter.volume_id === volumeId).forEach(chapter => {
+        if (volumeCheckbox.checked) state.selectedTxtExportChapterIds.add(chapter.id);
+        else state.selectedTxtExportChapterIds.delete(chapter.id);
+      });
+      renderChapterTxtExportList();
+      return;
+    }
+    const chapterCheckbox = event.target.closest("[data-export-chapter]");
+    if (!chapterCheckbox) return;
+    if (chapterCheckbox.checked) state.selectedTxtExportChapterIds.add(chapterCheckbox.dataset.exportChapter);
+    else state.selectedTxtExportChapterIds.delete(chapterCheckbox.dataset.exportChapter);
+    renderChapterTxtExportList();
+  });
+  $("#selectAllTxtExportChapters").addEventListener("change", event => {
+    state.selectedTxtExportChapterIds = event.currentTarget.checked
+      ? new Set(state.project.chapters.map(chapter => chapter.id))
+      : new Set();
+    renderChapterTxtExportList();
+  });
+  $("#confirmChapterTxtExportButton").addEventListener("click", exportSelectedChapterTxt);
+  $("#backFromChapterTxtExportButton").addEventListener("click", showImportExportOverview);
+  $("#exportBookTxtButton").addEventListener("click", exportBookTxt);
   $("#backToImportExportButton").addEventListener("click", showImportExportOverview);
   $("#backFromTxtImportButton").addEventListener("click", showImportExportOverview);
   $("#importTxtFiles").addEventListener("change", event => {
     state.pendingTxtFiles = [...event.currentTarget.files];
     renderTxtImportFileSummary();
   });
-  $("#importTxtVolume").addEventListener("change", renderTxtImportFileSummary);
+  $("#importTxtVolume").addEventListener("change", () => {
+    renderTxtTargetChapterOptions();
+    renderTxtImportFileSummary();
+  });
+  $("#importTxtMode").addEventListener("change", () => {
+    let existing = $("#importTxtMode").value === "existing";
+    if (existing && !$("#importTxtTargetChapter").value) {
+      $("#importTxtMode").value = "new";
+      existing = false;
+    }
+    $("#importTxtTargetChapterField").hidden = !existing;
+    $("#importTxtModeHint").textContent = existing
+      ? "只选择一个 TXT 文件。内容会替换所选章节正文，章节标题与故事地图关联保持不变。"
+      : "文件内容将导入为目标卷中的新章节，按现有章节顺序自动编号。";
+    renderTxtImportFileSummary();
+  });
+  $("#importTxtTargetChapter").addEventListener("change", renderTxtImportFileSummary);
   $("#confirmImportTxtButton").addEventListener("click", importTxtFiles);
+  $("#fullBookImportFile").addEventListener("change", event => selectFullBookImportFile(event.currentTarget.files[0]));
+  $("#fullBookImportEncoding").addEventListener("change", () => {
+    if (state.pendingFullBookFile) selectFullBookImportFile(state.pendingFullBookFile);
+  });
+  $("#confirmFullBookImportButton").addEventListener("click", importFullBookTxt);
+  $("#fullBookImportVolume").addEventListener("change", () => renderFullBookImportPreview());
+  $("#backFromFullBookImportButton").addEventListener("click", showImportExportOverview);
   $("#importExportDialog").addEventListener("close", () => {
     state.pendingTxtFiles = [];
+    state.pendingFullBookFile = null;
+    state.pendingFullBookChapters = [];
+    state.selectedTxtExportChapterIds.clear();
     $("#importTxtFiles").value = "";
+    $("#fullBookImportFile").value = "";
     renderTxtImportFileSummary();
+    renderFullBookImportPreview();
     showImportExportOverview();
   });
   $("#addVolumeButton").addEventListener("click", openNewVolumeDialog);

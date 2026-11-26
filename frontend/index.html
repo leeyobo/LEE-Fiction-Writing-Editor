@@ -367,21 +367,42 @@
               <div class="transfer-actions transfer-actions-chapters">
                 <button class="transfer-action" type="button" disabled><strong>导出 Markdown 压缩包</strong><span>.zip · 每章一个 .md</span><small>规划中</small></button>
                 <button class="transfer-action" type="button" disabled><strong>导入 Markdown 文件或压缩包</strong><span>导入为新章节</span><small>规划中</small></button>
-                <button class="transfer-action" type="button" disabled><strong>导出纯文本</strong><span>.txt · 便于阅读与分享</span><small>规划中</small></button>
-                <button id="openTxtImportFromTransfer" class="transfer-action transfer-action-available" type="button"><strong>导入 TXT 文件</strong><span>按文件名创建新章节</span><small>可用</small></button>
+                <button id="openChapterTxtExportButton" class="transfer-action transfer-action-available" type="button"><strong>导出章节</strong><span>从章节列表单选或多选</span><small>可用</small></button>
+                <button id="exportBookTxtButton" class="transfer-action transfer-action-available" type="button"><strong>导出全书</strong><span>.txt · 按故事卷与章节整理</span><small>可用</small></button>
+                <button id="openTxtImportFromTransfer" class="transfer-action transfer-action-available" type="button"><strong>导入 TXT 文件</strong><span>自动编号新章节或替换正文</span><small>可用</small></button>
+                <button id="openFullBookImportFromTransfer" class="transfer-action transfer-action-available" type="button"><strong>导入全书</strong><span>从一个 TXT 拆分为多个章节</span><small>可用</small></button>
               </div>
-              <p>TXT 导入支持批量选择、指定故事卷和选择文本编码，不会覆盖现有章节。</p>
+              <p>支持 TXT 章节导入与纯文本导出；全书导出会按故事卷归类，并附带章节标题。</p>
             </section>
           </div>
         </section>
         <section id="txtImportPanel" class="txt-import-panel" hidden>
-          <p class="modal-copy">每个 TXT 文件会作为一个新章节导入，文件名用作章节标题；不会覆盖已有章节。</p>
+          <p class="modal-copy">每个 TXT 文件可新建为一个自动编号章节，或只替换一个已有章节的正文。导入已有章节时会保留章节标题和故事地图关联。</p>
           <label>导入到故事卷<select id="importTxtVolume"></select></label>
+          <label>导入方式<select id="importTxtMode"><option value="new">新建章节（自动编号）</option><option value="existing">替换已有章节正文</option></select></label>
+          <label id="importTxtTargetChapterField" hidden>目标章节<select id="importTxtTargetChapter"></select></label>
+          <p id="importTxtModeHint" class="modal-copy txt-import-mode-hint">文件内容将导入为目标卷中的新章节，按现有章节顺序自动编号。</p>
           <label>文本编码<select id="importTxtEncoding"><option value="utf-8">UTF-8（推荐）</option><option value="gb18030">GB18030 / GBK（Windows 常见）</option><option value="utf-16le">UTF-16 LE</option></select></label>
           <label class="txt-file-picker">选择 TXT 文件<input id="importTxtFiles" type="file" accept=".txt,text/plain" multiple /></label>
           <div id="importTxtSummary" class="txt-import-summary" aria-live="polite">尚未选择文件</div>
           <ul id="importTxtFileList" class="txt-import-file-list" aria-label="待导入文件"></ul>
           <div class="modal-actions"><button id="backFromTxtImportButton" class="secondary-button" type="button">返回</button><button id="confirmImportTxtButton" class="wide-button" type="button" disabled>导入为新章节</button></div>
+        </section>
+        <section id="fullBookImportPanel" class="txt-import-panel" hidden>
+          <p class="modal-copy">选择一个整本 TXT 文件。系统会识别“【章节】标题”、Markdown 标题或“第 1 章 / 第一章”等章节标题，并将拆出的章节作为新章节导入；文件中的卷名会作为分隔标记，不会写入正文。</p>
+          <label>导入到故事卷<select id="fullBookImportVolume"></select></label>
+          <label>文本编码<select id="fullBookImportEncoding"><option value="utf-8">UTF-8（推荐）</option><option value="gb18030">GB18030 / GBK（Windows 常见）</option><option value="utf-16le">UTF-16 LE</option></select></label>
+          <label class="txt-file-picker">选择全书 TXT 文件<input id="fullBookImportFile" type="file" accept=".txt,text/plain" /></label>
+          <div id="fullBookImportSummary" class="txt-import-summary" aria-live="polite">尚未选择文件</div>
+          <ul id="fullBookChapterPreview" class="txt-import-file-list" aria-label="识别到的章节"></ul>
+          <div class="modal-actions"><button id="backFromFullBookImportButton" class="secondary-button" type="button">返回</button><button id="confirmFullBookImportButton" class="wide-button" type="button" disabled>导入为新章节</button></div>
+        </section>
+        <section id="chapterTxtExportPanel" class="chapter-txt-export-panel" hidden>
+          <p class="modal-copy">从作品目录中选择要导出的章节。单选会下载该章节 TXT；多选会合并为一个 TXT，并按故事卷与章节顺序排列。</p>
+          <div class="chapter-export-selection-toolbar"><label><input id="selectAllTxtExportChapters" type="checkbox" />全选</label><span id="chapterTxtExportSummary" aria-live="polite">已选择 0 个章节</span></div>
+          <div id="chapterTxtExportList" class="chapter-txt-export-list" aria-label="选择要导出的章节"></div>
+          <label id="chapterTxtExportModeField" class="chapter-export-mode-field" hidden><span>多选导出方式</span><select id="chapterTxtExportMode"><option value="combined">合并为一个 TXT</option><option value="separate">每章分别下载</option></select></label>
+          <div class="modal-actions"><button id="backFromChapterTxtExportButton" class="secondary-button" type="button">返回</button><button id="confirmChapterTxtExportButton" class="wide-button" type="button" disabled>导出所选章节</button></div>
         </section>
       </form>
     </dialog>
